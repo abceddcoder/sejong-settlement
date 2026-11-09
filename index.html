@@ -42,9 +42,9 @@ input[inputmode=numeric]{width:100%;min-width:0}
 .capture-help-text{display:block;margin:-6px 0 8px;padding:0 2px;border:0;background:none}
 .picker-actions{display:flex;align-items:center;gap:6px}
 .capture-help-icon{width:44px;padding:0;font-size:19px}
-#captureHelp,#modeChangeConfirm{width:calc(100% - 24px);max-width:460px;max-height:85vh;max-height:85dvh;margin:auto;padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);overflow-y:auto;overscroll-behavior:contain}
-#captureHelp::backdrop,#modeChangeConfirm::backdrop{background:#000b}
-.mode-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin:16px 0 0}.mode-confirm-actions button{min-width:80px;min-height:44px;cursor:pointer}#confirmModeChange{background:var(--acbg);border-color:var(--ac)}
+#captureHelp,#modeChangeConfirm,#resetConfirm{width:calc(100% - 24px);max-width:460px;max-height:85vh;max-height:85dvh;margin:auto;padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);overflow-y:auto;overscroll-behavior:contain}
+#captureHelp::backdrop,#modeChangeConfirm::backdrop,#resetConfirm::backdrop{background:#000b}
+.mode-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin:16px 0 0}.mode-confirm-actions button{min-width:80px;min-height:44px;cursor:pointer}.mode-confirm-actions .remove-collection{margin-top:0}#confirmModeChange{background:var(--acbg);border-color:var(--ac)}
 .help-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px}
 .help-heading h2{margin:0}
 .help-heading button{width:44px;flex:none;cursor:pointer;font-size:22px;padding:0}
@@ -73,6 +73,7 @@ input[inputmode=numeric]{width:100%;min-width:0}
 #prepayFields .capture-button{margin:0}
 #nicknameHint{margin:0 0 12px;color:var(--tx2)}
 .row input[inputmode=numeric]{max-width:160px}
+.money-field{min-width:0}.money-field input{width:100%}.money-preview{display:block;margin-top:3px;color:var(--tx2);font-size:12px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.money-preview:empty{display:none}.row .money-field{flex:1;max-width:160px}
 .unit{font-size:14px;color:var(--tx2)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mc{background:var(--soft);border-radius:10px;padding:12px}
@@ -203,7 +204,7 @@ button:disabled{opacity:.55;cursor:default}
 <div class="row"><label id="nicknamesLabel" for="nickname1">참석자 닉네임<br><span style="font-size:12px">(필수)</span></label><div id="nicknames" role="group" aria-labelledby="nicknamesLabel" aria-describedby="nicknameHint"></div></div>
 <p id="nicknameHint" class="lb"></p>
 </div>
-<div class="row" id="estimateRow" hidden><label for="base">1인 예상 비용</label><input type="text" id="base" maxlength="16" inputmode="numeric" pattern="[0-9]*" value="30000"><span class="unit">원</span></div>
+<div class="row" id="estimateRow" hidden><label for="base">1인 예상 비용</label><div class="money-field"><input type="text" id="base" maxlength="24" inputmode="numeric" pattern="[0-9]*" value="30000" aria-describedby="basePreview"><small id="basePreview" class="money-preview"></small></div><span class="unit">원</span></div>
 <div class="row"><label for="acct">입금 계좌<br><span style="font-size:12px">(선택)</span></label><input type="text" id="acct" maxlength="300" placeholder="은행 · 계좌번호 · 예금주" autocomplete="off"></div>
 <div id="feeEstimate" hidden>
 <div class="row"><label>여유분</label><span style="font-weight:600">20% 포함</span></div>
@@ -256,6 +257,11 @@ button:disabled{opacity:.55;cursor:default}
 <h2 id="modeChangeTitle">정산 방식 바꾸기</h2>
 <p id="modeChangeDescription">입금 확인을 해제하고 바로 정산으로 바꿀까요? 닉네임과 계산서 금액은 그대로 남아요.</p>
 <form method="dialog" class="mode-confirm-actions"><button value="cancel" autofocus>취소</button><button id="confirmModeChange" type="button">바꾸기</button></form>
+</dialog>
+<dialog id="resetConfirm" aria-labelledby="resetTitle" aria-describedby="resetDescription">
+<h2 id="resetTitle">모임 초기화</h2>
+<p id="resetDescription">현재 모임의 명단, 금액, 입금 확인과 계좌를 모두 초기화할까요?</p>
+<form method="dialog" class="mode-confirm-actions"><button value="cancel" autofocus>취소</button><button id="confirmResetMeeting" type="button" class="remove-collection">초기화하기</button></form>
 </dialog>
 <script>
 const $=id=>document.getElementById(id);
@@ -416,21 +422,24 @@ function pickerHtml(kind,number){
   +'<div class="add-person"><input type="text" id="'+id+'New" maxlength="1000" placeholder="새로 온 사람 닉네임" aria-label="'+number+'차 '+(kind==='collection'?'회비':'정산')+' 명단에 추가할 닉네임" autocomplete="off"><button type="button" id="'+id+'Add">추가</button></div>'
   +'<p id="'+id+'CaptureStatus" class="lb capture-status" role="status"></p>';
 }
+function moneyField(id,attributes){return '<div class="money-field"><input type="text" id="'+id+'" inputmode="numeric" pattern="[0-9]*" aria-describedby="'+id+'Preview" '+attributes+'><small id="'+id+'Preview" class="money-preview"></small></div>';}
+function readMoneyInput(id){const input=$(id),value=input.value.replace(/[,\s]/g,'');if(input.value!==value)input.value=value;return value;}
+function renderMoneyInput(id,value){putValue(id,value);const parsed=amount(value);$(id+'Preview').textContent=parsed===null?'':won(parsed);}
 function buildRounds(){
  let bills='',collections='';
  for(let n=1;n<=4;n++){
-  bills+='<div class="rd" id="r'+n+'"><div class="rr bill-row"><label for="b'+n+'"><b>'+n+'차</b></label><input type="text" id="b'+n+'" placeholder="계산서 총액" aria-label="'+n+'차 계산서 총액" inputmode="numeric" pattern="[0-9]*"></div>'
+  bills+='<div class="rd" id="r'+n+'"><div class="rr bill-row"><label for="b'+n+'"><b>'+n+'차</b></label>'+moneyField('b'+n,'placeholder="계산서 총액" aria-label="'+n+'차 계산서 총액"')+'</div>'
    +'<div class="round-roster lb" id="roundStatus'+n+'"></div>'
    +'<label class="tg settled-toggle"><input type="checkbox" id="settled'+n+'" aria-label="'+n+'차 정산 완료"> 정산 완료</label>';
   if(n>1){
    bills+='<details id="rosterEdit'+n+'" class="round-roster-edit"><summary>명단 수정</summary>'+pickerHtml('actual',n)+'</details>';
    collections+='<details class="collection-round" id="prepayRound'+n+'" hidden><summary><span id="collectionSummary'+n+'"></span><span class="summary-action">보기 / 수정</span></summary><div class="collection-body">'
-    +pickerHtml('collection',n)+'<label for="prepayAmount'+n+'">1인 선입금액</label><input type="text" id="prepayAmount'+n+'" inputmode="numeric" pattern="[0-9]*" placeholder="원">'
+    +pickerHtml('collection',n)+'<label for="prepayAmount'+n+'">1인 선입금액</label>'+moneyField('prepayAmount'+n,'placeholder="원"')
     +'<p id="prepayWarn'+n+'" class="warn" hidden role="alert"></p><button type="button" id="prepayGuide'+n+'">선입금 안내 문구 만들기</button>'
     +'<label class="tg payment-confirm"><input type="checkbox" id="prepayConfirmed'+n+'"> 전원 입금 확인</label><p id="paymentHint'+n+'" class="lb payment-hint"></p>'
     +'<button id="removePrepay'+n+'" class="remove-collection" type="button">이 차수 회비 삭제</button></div></details>';
   }
-  bills+='<div class="round-drinkers" id="noAlcoholBlock'+n+'" hidden><div class="rr bill-row"><label for="k'+n+'">술값</label><input type="text" id="k'+n+'" inputmode="numeric" pattern="[0-9]*" placeholder="총액에 포함된 술값" aria-label="'+n+'차 총액에 포함된 술값"></div>'
+  bills+='<div class="round-drinkers" id="noAlcoholBlock'+n+'" hidden><div class="rr bill-row"><label for="k'+n+'">술값</label>'+moneyField('k'+n,'placeholder="총액에 포함된 술값" aria-label="'+n+'차 총액에 포함된 술값"')+'</div>'
    +'<p class="lb picker-hint">술 안 마신 사람만 선택해 주세요.</p><div id="noAlcohol'+n+'" class="person-options" role="group" aria-label="'+n+'차 술 안 마신 사람"></div><p id="drinkCount'+n+'" class="lb picker-hint"></p></div></div>';
  }
  $('rounds').innerHTML=bills;$('prepayFields').innerHTML=collections;
@@ -510,7 +519,7 @@ function renderCollection(number){
  $('prepayConfirmed'+number).disabled=captureBusy||r.settled;
  $('paymentHint'+number).textContent=payment?'입금 확인 완료 · 금액이나 명단을 고치려면 확인을 해제해 주세요.':'실제로 모두 입금했을 때 체크해 주세요.';
  if(number===1){
-  putValue('ppl',S.ppl);putValue('base',S.base);putValue('acct',S.account);
+  putValue('ppl',S.ppl);renderMoneyInput('base',S.base);putValue('acct',S.account);
   $('ppl').disabled=$('base').disabled=Boolean(payment)||r.settled;
   renderNicknames();
   const info=feeInfo();$('fee').textContent=info?won(info.fee):'-';$('tot').textContent=info?won(info.fee*info.ppl):'-';
@@ -518,7 +527,7 @@ function renderCollection(number){
   const id='prepayNames'+number;
   renderChoices(id,knownNames(),collectionNames(number),Boolean(payment)||r.settled,(name,on)=>toggleRoster('collection',number,name,on));
   putValue(id+'New',r.newCollectionName);$(id+'New').disabled=$(id+'Add').disabled=Boolean(payment)||r.settled;
-  putValue('prepayAmount'+number,payment?String(payment.amount):r.collectionAmount);$('prepayAmount'+number).disabled=Boolean(payment)||r.settled;
+  renderMoneyInput('prepayAmount'+number,payment?String(payment.amount):r.collectionAmount);$('prepayAmount'+number).disabled=Boolean(payment)||r.settled;
   $('removePrepay'+number).disabled=Boolean(payment)||r.settled;
  }
 }
@@ -530,11 +539,13 @@ function renderRounds(){
  $('dOn').checked=S.dOn;
  for(let n=1;n<=4;n++){
   const r=S.rounds[n-1],names=roster(n),noAlcohol=noAlcoholNames(n);
-  $('r'+n).hidden=n>S.lastRound;putValue('b'+n,r.bill);putValue('k'+n,r.liquor);
+  $('r'+n).hidden=n>S.lastRound;renderMoneyInput('b'+n,r.bill);renderMoneyInput('k'+n,r.liquor);
   $('r'+n).classList.toggle('settled',r.settled);$('settled'+n).checked=r.settled;
   $('b'+n).disabled=$('k'+n).disabled=r.settled;
   const status=r.payment?(n===1?'회비 반영':'선입금 반영'):n===1?'입금 확인 전':r.collectionVisible&&r.collectionAmount?'입금 확인 전':'선입금 없음';
-  $('roundStatus'+n).textContent=names.length+'명'+(r.settled?' · 정산 완료 · 이번 계산에서 제외':isDirect()?'':' · '+status);
+  const expected=S.rounds[0].payment?.names.length??amount(S.ppl,1,100)??0;
+  const pending=S.rounds.slice(1,n).every(round=>round.attendees===null)&&names.length<expected;
+  $('roundStatus'+n).textContent=(pending?expected:names.length)+'명'+(pending?' · 닉네임 입력 '+(names.length?'중':'전'):'')+(r.settled?' · 정산 완료 · 이번 계산에서 제외':isDirect()?'':' · '+status);
   $('noAlcoholBlock'+n).hidden=!S.dOn;
   renderChoices('noAlcohol'+n,names,noAlcohol,r.settled,(name,on)=>{
    const chosen=noAlcoholNames(n);r.noAlcohol=on?[...new Set([...chosen,name])]:chosen.filter(value=>value!==name);refresh();
@@ -780,12 +791,14 @@ function renderBalance(label,balance,roundCosts='',paidBySelf=false,cost=0){
  row.append(description,result);
  $('res').appendChild(row);
 }
+function settlementName(item){return item.name+(item.noAlcohol?'(노술)':'');}
+function recipientNames(items){return ' ('+items.map(settlementName).join(', ')+')';}
 function directSettlementText(balances,account){
  const senders=balances.filter(item=>!item.paidBySelf),more=senders.some(item=>item.balance<0);
  const same=senders.length>0&&senders.every(item=>item.balance===senders[0].balance);
- const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf,item.cost));
+ const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+settlementName(item)+' '+balanceText(item.balance,item.paidBySelf,item.cost));
  if(account&&more)lines.unshift('입금 계좌: '+account+'\n');
- if(same)lines.push(senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.'));
+ if(same)lines.push(senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.')+recipientNames(senders));
  else if(more)lines.push('\n위 금액을 보내주세요.');
  return lines.join('\n');
 }
@@ -867,19 +880,19 @@ function settleByPerson(rounds,payments,account){
  }).join('\n')+'\n';
  let refund=false,more=false;const balances=[];
  for(const [name,shares] of costs){
-  let amount=0;
-  const details=shares.map(({number,share,noAlcohol})=>{const previous=Math.round(amount);amount+=share;return number+'차 '+won(Math.round(amount)-previous)+(noAlcohol?' (노술)':'');});
-  const cost=roundedCost(shares),rounding=cost-Math.round(amount),prepaid=paid.get(name)??0,paidBySelf=name===S.payer,balance=paidBySelf?0:prepaid-cost;
+  const details=shares.map(({number,share,noAlcohol})=>number+'차 '+won(Math.round(share))+(noAlcohol?' (노술)':''));
+  const cost=roundedCost(shares),rounding=cost-shares.reduce((sum,item)=>sum+Math.round(item.share),0),prepaid=paid.get(name)??0,paidBySelf=name===S.payer,balance=paidBySelf?0:prepaid-cost;
   if(rounding>0) details.push('올림 +'+won(rounding));
+  if(rounding<0) details.push('표시 차이 −'+won(-rounding));
   const paymentText=prepaid?'\n낸 회비 '+won(prepaid)+' ('+paidDetails.get(name).join(' · ')+')':'';
   renderBalance(name+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText,paidBySelf,cost);
-  refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf,cost});
+  refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf,cost,noAlcohol:rounds.some(round=>round.noAlcohol.includes(name)&&round.names.includes(name))});
  }
  if(isDirect())return message+'\n'+directSettlementText(balances,account);
  const recipients=balances.filter(item=>!item.paidBySelf),balance=recipients[0]?.balance;
  const same=recipients.length>0&&recipients.every(item=>item.balance===balance);
- const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf,item.cost));
- if(same)lines.push(recipients.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.')));
+ const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+settlementName(item)+' '+balanceText(item.balance,item.paidBySelf,item.cost));
+ if(same)lines.push(recipients.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.'))+recipientNames(recipients));
  message+='\n'+lines.join('\n');
  if(refund) message+='\n\n돌려받으실 분은 계좌 남겨주세요.';
  if(more) message+=(refund?'\n':'\n\n')+'입금할 금액은 '+(account?account+ro(account)+' ':'')+'지금 보내주세요.';
@@ -988,7 +1001,11 @@ async function handleCapture(event){
  }
 }
 function resetMeeting(){
- if(!confirm('현재 모임의 명단, 금액, 입금 확인과 계좌를 모두 초기화할까요?')) return;
+ $('resetConfirm').showModal();
+}
+function confirmResetMeeting(){
+ const dialog=$('resetConfirm');if(!dialog.open)return;
+ dialog.close();
  captureRevision++;S=freshState();
  try{localStorage.removeItem('acct');localStorage.removeItem(STORAGE_KEY);}catch{}
  document.querySelectorAll('.capture-status').forEach(status=>{status.textContent='';});
@@ -1001,7 +1018,8 @@ function bindEvents(){
  document.querySelectorAll('#settlementMode button').forEach(button=>button.addEventListener('click',()=>setMode(button.dataset.mode)));
  $('confirmModeChange').addEventListener('click',confirmModeChange);
  $('resetMeeting').addEventListener('click',resetMeeting);
- ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S[id]=$(id).value;refresh();}}));
+ $('confirmResetMeeting').addEventListener('click',confirmResetMeeting);
+ ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S[id]=id==='base'?readMoneyInput(id):$(id).value;refresh();}}));
  $('acct').addEventListener('input',()=>{S.account=$('acct').value;refresh();});
  $('payer').addEventListener('change',()=>setPayer($('payer').value));
  $('toggleNicknames').addEventListener('click',()=>{S.nicknamesOpen=!S.nicknamesOpen;renderNicknames();saveState();});
@@ -1013,12 +1031,12 @@ function bindEvents(){
   $('settled'+n).addEventListener('change',()=>toggleSettled(n,$('settled'+n).checked));
   $(n===1?'collectionRound1':'prepayRound'+n).addEventListener('toggle',event=>{if(!(isDirect()&&n===1)&&r().collectionOpen!==event.target.open){r().collectionOpen=event.target.open;saveState();}});
   $('prepayConfirmed'+n).addEventListener('change',()=>togglePayment(n,$('prepayConfirmed'+n).checked));
-  $('b'+n).addEventListener('input',()=>{r().bill=$('b'+n).value;refresh();});
-  $('k'+n).addEventListener('input',()=>{r().liquor=$('k'+n).value;refresh();});
+  $('b'+n).addEventListener('input',()=>{if(!r().settled){r().bill=readMoneyInput('b'+n);refresh();}});
+  $('k'+n).addEventListener('input',()=>{if(!r().settled){r().liquor=readMoneyInput('k'+n);refresh();}});
   if(n>1){
    $('removePrepay'+n).addEventListener('click',()=>removeCollection(n));
    $('rosterEdit'+n).addEventListener('toggle',event=>{if(r().rosterOpen!==event.target.open){r().rosterOpen=event.target.open;saveState();}});
-   $('prepayAmount'+n).addEventListener('input',()=>{if(!r().payment){r().collectionAmount=$('prepayAmount'+n).value;refresh();}});
+   $('prepayAmount'+n).addEventListener('input',()=>{if(!r().payment&&!r().settled){r().collectionAmount=readMoneyInput('prepayAmount'+n);refresh();}});
    for(const kind of ['collection','actual']){
     const id=(kind==='collection'?'prepayNames':'names')+n,key=kind==='collection'?'newCollectionName':'newAttendee';
     $(id+'New').addEventListener('input',()=>{if(kind==='actual'||!r().payment){r()[key]=$(id+'New').value;saveState();}});
