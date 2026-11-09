@@ -10,7 +10,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담') {
   const rows = [], workers = [];
   const elements = {};
-  const element = () => ({ children: [], classList: { toggle() {} }, focus() {}, after() {}, addEventListener() {}, appendChild(child) { this.children.push(child); } });
+  const element = () => ({ children: [], style: {}, classList: { toggle() {} }, focus() {}, after() {}, setAttribute() {}, addEventListener() {}, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
   class Worker {
     constructor(url) { this.url = url; workers.push(this); }
     postMessage(message) {
@@ -29,8 +29,8 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
     setTimeout, clearTimeout, rows,
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
-  vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=()=>clearCaptureReview(); renderNicknames=saveState=()=>{};', context);
-  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
+  vm.runInContext('const renderBalanceUI=renderBalance,renderNicknamesUI=renderNicknames; renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=()=>clearCaptureReview(); renderNicknames=saveState=()=>{};', context);
+  return { api: vm.runInContext('({renderBalanceUI,renderNicknamesUI,roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
@@ -169,9 +169,10 @@ test('direct settlement needs no estimate, buffer, or payment confirmation', () 
   api.setMode('direct');
   const message = api.calculate(true);
   assert.deepEqual(rows.map(row => row[1]), [-25000, -25000, -25000, -25000]);
-  assert.ok(rows.every(row => row[2] === true));
+  assert.ok(rows.every(row => row[2].includes('1차 25,000원')));
   assert.match(message, /1차 4명 · 계산서 100,000원/);
-  assert.doesNotMatch(message, /받은 회비|낸 회비|추가 입금|돌려드려요/);
+  assert.doesNotMatch(message, /받은 회비|낸 회비|환불/);
+  assert.match(message, /4명 모두 1인 25,000원씩 추가 입금해 주세요\./);
 });
 
 test('direct settlement still handles alcohol exclusions and later arrivals', () => {
@@ -183,7 +184,7 @@ test('direct settlement still handles alcohol exclusions and later arrivals', ()
   api.setMode('direct');
   const message = api.calculate(true);
   assert.deepEqual(rows.map(row => row[1]), [-70000, -40000, -10000]);
-  assert.match(rows[1][3], /1차 40,000원 \(노술\)/);
+  assert.match(rows[1][2], /1차 40,000원 \(노술\)/);
   assert.match(message, /2차 2명 · 계산서 20,000원/);
 });
 
@@ -340,4 +341,104 @@ test('completion is reversible, requires a valid receipt, and protects completed
   assert.equal(api.captureLocked('nicknames'), false);
   api.calculate();
   assert.deepEqual(rows.map(row => row[1]), [-10000, -10000]);
+});
+
+test('equal final deposits collapse to one chat line while individual screen results remain', () => {
+  const { api, rows } = calculator();
+  const names = Array.from({ length: 10 }, (_, i) => 'sample' + (i + 1));
+  const message = api.settleByPerson([{ number: 1, names, bill: 55000, liquor: 0, noAlcohol: [] }], [], 'sample계좌');
+  assert.equal(message.split('\n').filter(line => line.includes('모두')).join('\n'), '10명 모두 1인 5,500원씩 추가 입금해 주세요.');
+  assert.doesNotMatch(message, /· sample\d+/);
+  assert.match(message, /sample계좌로 지금 보내주세요/);
+  assert.equal(rows.length, 10);
+  assert.ok(rows.every(row => row[1] === -5500));
+});
+
+test('equal refunds use final balances even when costs and prepaid amounts differ', () => {
+  const { api, rows } = calculator();
+  api.setMode('prepay');
+  const names = ['sample1', 'sample2'];
+  const message = api.settleByPerson([
+    { number: 1, names, bill: 10000, liquor: 0, noAlcohol: [] },
+    { number: 2, names: ['sample2'], bill: 2000, liquor: 0, noAlcohol: [] },
+  ], [{ number: 1, names, amount: 6000 }, { number: 2, names: ['sample2'], amount: 2000 }], '');
+  assert.deepEqual(rows.map(row => row[1]), [1000, 1000]);
+  assert.match(message, /\n2명 모두 1인 1,000원씩 환불해 드릴게요\.\n/);
+  assert.doesNotMatch(message, /· sample\d+|추가 입금|지금 보내주세요/);
+  assert.match(message, /계좌 남겨주세요/);
+});
+
+test('zero balances collapse without a deposit or refund request', () => {
+  const { api } = calculator();
+  api.setMode('prepay');
+  const names = ['sample1', 'sample2'];
+  const message = api.settleByPerson([{ number: 1, names, bill: 10000, liquor: 0, noAlcohol: [] }], [{ number: 1, names, amount: 5000 }], '');
+  assert.match(message, /\n2명 모두 정산 없음\.$/);
+  assert.doesNotMatch(message, /· sample\d+|추가 입금|환불|지금 보내주세요|계좌 남겨주세요/);
+});
+
+test('different final balances keep each name and do not merge opposite payment directions', () => {
+  const { api, rows, elements } = calculator();
+  api.setMode('prepay');
+  const names = ['sample1', 'sample2', 'sample3'];
+  const message = api.settleByPerson([
+    { number: 1, names, bill: 15000, liquor: 0, noAlcohol: [] },
+    { number: 2, names: ['sample2'], bill: 1000, liquor: 0, noAlcohol: [] },
+  ], [{ number: 1, names, amount: 5000 }, { number: 2, names: ['sample1'], amount: 1000 }], '');
+  assert.deepEqual(message.split('\n').filter(line => line.startsWith('· ')), [
+    '· sample1 환불 1,000원', '· sample2 추가 입금 1,000원', '· sample3 정산 없음',
+  ]);
+  assert.doesNotMatch(message, /명 모두/);
+  for (const row of rows) api.renderBalanceUI(...row);
+  assert.deepEqual(elements.res.children.map(row => row.children[1].textContent), ['환불 1,000원', '추가 입금 1,000원', '정산 없음']);
+  assert.equal(elements.res.children[0].children[1].style.color, 'var(--ok)');
+  assert.equal(elements.res.children[1].children[1].style.color, 'var(--bad)');
+  assert.match(elements.res.children[0].children[0].children[0].textContent, /1차 5,000원/);
+});
+
+test('equal costs with different payments still produce individual final messages', () => {
+  const { api } = calculator();
+  api.setMode('prepay');
+  const names = ['sample1', 'sample2'];
+  const message = api.settleByPerson([{ number: 1, names, bill: 10000, liquor: 0, noAlcohol: [] }], [{ number: 1, names: ['sample1'], amount: 5000 }], '');
+  assert.deepEqual(message.split('\n').filter(line => line.startsWith('· ')), ['· sample1 정산 없음', '· sample2 추가 입금 5,000원']);
+  assert.doesNotMatch(message, /명 모두/);
+});
+
+test('nickname guidance hides only for complete valid names and returns when incomplete', () => {
+  const { api, elements } = calculator();
+  const state = api.state();
+  state.ppl = '2'; state.nicknames = ['sample1', ''];
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, false);
+  assert.match(elements.nicknameHint.textContent, /참석자 2명의 닉네임/);
+  state.nicknames[1] = ' sample2 ';
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, true);
+  assert.ok(elements.nicknames.children.every(input => input.required === true));
+  state.nicknames[1] = '   ';
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, false);
+  state.nicknames[1] = 'sample1';
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, false);
+  state.rounds[0].bill = '10000';
+  assert.equal(api.calculate(true), undefined);
+  assert.match(elements.feeWarn.textContent, /중복 없이 모두/);
+  state.nicknames[1] = 'sample2'; state.ppl = '3';
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, false);
+  assert.match(elements.nicknameHint.textContent, /참석자 3명의 닉네임/);
+  state.ppl = '2';
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, true);
+});
+
+test('confirmed nickname lists hide the hint while keeping the fields locked and required', () => {
+  const { api, elements } = calculator();
+  api.state().ppl = '2';
+  api.state().rounds[0].payment = api.freezePayment(['sample1', 'sample2'], 6000);
+  api.renderNicknamesUI();
+  assert.equal(elements.nicknameHint.hidden, true);
+  assert.ok(elements.nicknames.children.every(input => input.disabled && input.required));
 });
