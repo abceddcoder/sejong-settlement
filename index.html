@@ -454,14 +454,19 @@ function refresh(save=true){
  if(save) saveState();
 }
 function captureNicknames(text){
- const names=[];
- for(const line of text.split(/\r?\n/)){
-  const row=line.normalize('NFKC').replace(/[∕⁄]/g,'/').trim();
-  const match=row.match(/^(.{1,40}?)\s*[/|]\s*\d{2,4}\s*[/|]\s*[남여](?=$|[/|\s])/u);
+ const rows=text.normalize('NFKC').replace(/[∕⁄]/g,'/').split(/\r?\n/).map(row=>row.trim()).filter(Boolean);
+ const names=[],profile=/^\d{2}\s*대.*(?:남성|여성)/u;
+ for(let i=0;i<rows.length;i++){
+  const match=rows[i].match(/^(.{1,40}?)\s*[/|]\s*\d{2,4}\s*[/|](.*)$/u);
   if(!match) continue;
-  const name=match[1].replace(/^(?:[©®●○◉◎]|나\s+)\s*/u,'').trim();
+  // A damaged gender character must not discard a nickname with a profile row.
+  if(!/^\s*[남여]/u.test(match[2])&&!profile.test(rows[i+1]||'')) continue;
+  // The first attendee's circular "나" badge is read differently by each browser.
+  const name=match[1].trim().replace(/^(?:(?:[©®●○◉◎]|\[\s*나\s*\]|\(\s*나\s*\)|【\s*나\s*】)\s*|나\s+)+/u,'').trim();
   if(/[\p{L}\p{N}]/u.test(name)) names.push(name);
  }
+ // Do not replace an existing roster when a visible participant was skipped.
+ if(rows.filter(row=>profile.test(row)).length>names.length) throw captureError('OCR-PARTIAL');
  return names;
 }
 function captureError(code){
@@ -575,6 +580,7 @@ async function readCapture(file,onProgress=()=>{}){
 }
 function captureErrorMessage(error,file){
  const code=error?.code||'OCR-UNKNOWN';
+ if(code==='OCR-PARTIAL') return '일부 닉네임을 읽지 못해 기존 명단은 바꾸지 않았어요. 더 선명한 캡처로 다시 시도하거나 직접 입력해 주세요.';
  if(code==='FILE-EMPTY'||code==='FILE-READ') return '사진 파일을 열지 못했어요. 휴대폰에 저장된 캡처를 다시 선택해 주세요. ('+code+')';
  if(code==='IMG-DECODE') return /\.hei[cf]$/i.test(file.name||'')
   ?'이 사진 형식은 여기서 열 수 없어요. 화면을 캡처해서 다시 선택해 주세요. (IMG-DECODE)'
@@ -735,9 +741,11 @@ function captureLocked(id){
 }
 function syncCaptureButtons(){document.querySelectorAll('[data-capture]').forEach(button=>{button.disabled=captureBusy||captureLocked(button.dataset.capture);});}
 async function handleCapture(event){
- const file=event.target.files[0];event.target.value='';
- const id=captureTarget;if(!file||captureBusy||captureLocked(id)) return;
+ const files=Array.from(event.target.files||[]);event.target.value='';
+ const id=captureTarget;if(!files.length||captureBusy||captureLocked(id)) return;
  const first=id==='nicknames',status=$(first?'captureStatus':id+'CaptureStatus');
+ if(files.length!==1){status.textContent='캡처는 한 장씩 올려 주세요. 사진 한 장만 다시 선택해 주세요.';return;}
+ const file=files[0];
  if(file.size>25*1024*1024){status.textContent='25MB 이하의 캡처 이미지를 선택해 주세요.';return;}
  const revision=captureRevision;
  captureBusy=true;syncCaptureButtons();
@@ -794,7 +802,7 @@ function bindEvents(){
    });
   }
  }
- document.querySelectorAll('[data-capture]').forEach(button=>button.addEventListener('click',()=>{if(!button.disabled){captureTarget=button.dataset.capture;$('captureFile').click();}}));
+ document.querySelectorAll('[data-capture]').forEach(button=>button.addEventListener('click',()=>{if(!button.disabled){captureTarget=button.dataset.capture;$('captureFile').multiple=false;$('captureFile').click();}}));
  $('captureFile').addEventListener('change',handleCapture);
  $('collect').addEventListener('click',()=>{
   clearWarnings();$('message').hidden=true;const draft=firstPaymentDraft(true);if(!draft) return;

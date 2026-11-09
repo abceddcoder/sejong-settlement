@@ -7,27 +7,29 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-function calculator(workerFailure = false) {
+function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담') {
   const rows = [], workers = [];
+  const elements = {};
   class Worker {
     constructor(url) { this.url = url; workers.push(this); }
     postMessage(message) {
       queueMicrotask(() => {
         if (workerFailure) return this.onerror({ preventDefault() {} });
         const data = message.action === 'recognize'
-          ? { text: 'sample1/93/남/종촌\nsample2/92/여/도담' } : {};
+          ? { text: recognizedText } : {};
         this.onmessage({ data: { jobId: message.jobId, status: 'resolve', data } });
       });
     }
     terminate() { this.terminated = true; }
   }
   const context = vm.createContext({
-    document: {}, location: { protocol: 'https:' }, WebAssembly: {}, Worker,
+    document: { getElementById: id => elements[id] ||= {}, querySelectorAll: () => [] },
+    location: { protocol: 'https:' }, WebAssembly: {}, Worker,
     setTimeout, clearTimeout, rows,
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
-  vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]);', context);
-  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers };
+  vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=renderNicknames=saveState=()=>{};', context);
+  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
@@ -90,4 +92,60 @@ test('an unavailable OCR download reports failure and allows a retry', async () 
   await assert.rejects(api.readCapture({}), error => error.code === 'OCR-LOAD');
   assert.equal(workers.length, 2);
   assert.ok(workers.every(worker => worker.terminated));
+});
+
+test('self badges are removed without changing nicknames beginning with na', () => {
+  const { api } = calculator();
+  for (const badge of ['© ', '[나] ', '(나) ', '【나】 ', '나 ', '● ']) {
+    assert.deepEqual(Array.from(api.captureNicknames(badge + 'sample1/93/남/종촌')), ['sample1']);
+  }
+  assert.deepEqual(Array.from(api.captureNicknames('나비/93/여/도담')), ['나비']);
+});
+
+test('a damaged gender field does not omit an attendee with a profile description', () => {
+  const { api } = calculator();
+  const text = '[나] sample1/93/2/종촌\n\n30대 중반 남성\nsample2/92/여도담\n30대 중반 여성\n탈퇴 사용자\n본인인증 완료';
+  assert.deepEqual(Array.from(api.captureNicknames(text)), ['sample1', 'sample2']);
+  assert.deepEqual(Array.from(api.captureNicknames('모임/2026/11/09\n참여 중 17\n탈퇴 사용자\n본인인증 완료')), []);
+});
+
+test('a later capture selects matching and new attendees without changing earlier payments', async () => {
+  const { api } = calculator(false, '[나] sample1/93/2/종촌\n30대 중반 남성\nsample2/92/여도담\n30대 중반 여성\nsample5/95/남/고운\n30대 초반 남성');
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.rounds[0].payment = api.freezePayment(state.nicknames, 36000);
+  state.rounds[1].collectionNames = [...state.nicknames];
+  api.target('prepayNames2');
+  await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
+  assert.deepEqual(Array.from(state.rounds[1].collectionNames), ['sample1', 'sample2', 'sample5']);
+  assert.deepEqual(Array.from(state.rounds[1].attendees), ['sample1', 'sample2', 'sample5']);
+  assert.deepEqual(Array.from(state.rounds[0].payment.names), ['sample1', 'sample2', 'sample3', 'sample4']);
+});
+
+test('a skipped profile prevents partial OCR from overwriting an existing roster', async () => {
+  const { api, elements, workers } = calculator(false, '읽기 실패\n30대 중반 남성\nsample2/92/여/도담\n30대 중반 여성');
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.rounds[1].collectionNames = [...state.nicknames];
+  const before = JSON.stringify(state);
+  api.target('prepayNames2');
+  await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
+  assert.equal(JSON.stringify(state), before);
+  assert.match(elements.prepayNames2CaptureStatus.textContent, /기존 명단은 바꾸지 않았어요/);
+  assert.ok(workers[0].terminated);
+});
+
+test('multiple images are rejected without reading or replacing any roster', async () => {
+  const { api, elements, workers } = calculator();
+  const before = JSON.stringify(api.state());
+  for (const target of ['nicknames', 'prepayNames2', 'names3']) {
+    api.target(target);
+    const input = { files: [{ size: 100 }, { size: 100 }], value: 'captures' };
+    await api.handleCapture({ target: input });
+    assert.equal(input.value, '');
+    assert.match(elements[target === 'nicknames' ? 'captureStatus' : target + 'CaptureStatus'].textContent, /한 장씩/);
+  }
+  assert.equal(JSON.stringify(api.state()), before);
+  assert.equal(workers.length, 0);
+  assert.doesNotMatch(html.match(/<input[^>]+id="captureFile"[^>]*>/)[0], /\bmultiple\b/);
 });
