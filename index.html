@@ -37,6 +37,15 @@ input[inputmode=numeric]{width:100%;min-width:0}
 .capture-button:disabled{cursor:default;opacity:.6}
 .capture-status{margin:0 0 12px}
 .capture-status:empty{display:none}
+.capture-review{margin:10px 0 16px;padding:12px;border:1px solid var(--ac);border-radius:10px;background:var(--soft)}
+.capture-review h3{margin:0 0 6px;font-size:15px}
+.capture-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
+.capture-review-list label{min-width:0;font-size:12px;color:var(--tx2)}
+.capture-review-list input{width:100%;margin-top:3px}
+.capture-review-actions{display:flex;gap:8px}
+.capture-review-actions button{flex:1;cursor:pointer}
+#captureReviewChanges{white-space:pre-line;overflow-wrap:anywhere}
+#applyCapture{color:var(--ac);border-color:var(--ac)}
 .capture-roster-label{display:flex;align-items:center;gap:8px}
 #prepayFields .capture-button{margin:0}
 #nicknameHint{margin:0 0 12px;color:var(--tx2)}
@@ -66,6 +75,8 @@ input[inputmode=numeric]{width:100%;min-width:0}
 #addPrepay{margin-top:10px;cursor:pointer;color:var(--ac)}
 .bill-row{grid-template-columns:44px minmax(0,1fr)}
 .round-roster{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;color:var(--tx2)}
+.settled-toggle{margin:4px 0 0}
+.rd.settled .round-roster{color:var(--ok)}
 .round-roster-edit{margin-top:6px;font-size:13px}
 .round-roster-edit summary{cursor:pointer;color:var(--ac)}
 .round-roster-edit input,.round-drinkers input{width:100%;min-width:0;margin:3px 0}
@@ -199,6 +210,11 @@ button:disabled{opacity:.55;cursor:default}
 <button id="calculate" type="button">계산하기</button>
 </section>
 <section id="message" hidden><h2>단톡 안내 문구</h2><div id="msg"></div><button id="cp" type="button">문구 복사</button></section>
+<div id="captureReview" class="capture-review" hidden aria-labelledby="captureReviewTitle">
+<h3 id="captureReviewTitle">캡처 이름 확인</h3><p class="lb">이름이 잘못 읽혔다면 고쳐 주세요. 적용 전에는 기존 명단이 바뀌지 않아요.</p>
+<div id="captureReviewList" class="capture-review-list"></div><p id="captureReviewChanges" class="lb"></p><p id="captureReviewError" class="warn" role="alert" hidden></p>
+<div class="capture-review-actions"><button id="applyCapture" type="button">명단 적용</button><button id="cancelCapture" type="button">취소</button></div>
+</div>
 <footer class="group-credit"><a href="https://daangn.com/kr/share/community/ref/invite-group/baVmPBXpIwJ" target="_blank" rel="noopener noreferrer">당근 ‘세종 2030 오늘 뭐하지?’<br>모임에서 만들었어요.</a><p style="margin:4px 0 0">자유롭게 이용하셔도 좋아요.<br>모임 출처와 링크는 지우지 말고 꼭 남겨 주세요.</p></footer>
 </main>
 <script>
@@ -206,9 +222,9 @@ const $=id=>document.getElementById(id);
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const STORAGE_KEY='meetup-fee-calc.state.v1';
 const MAX_MONEY=1000000000000;
-let captureTarget='nicknames',captureBusy=false,captureRevision=0;
+let captureTarget='nicknames',captureBusy=false,captureRevision=0,captureReview=null;
 function freshRound(index){
- return {bill:'',liquor:'',attendees:null,noAlcohol:null,collectionNames:null,collectionAmount:'',payment:null,collectionVisible:index===0,collectionOpen:index===0,rosterOpen:false,newAttendee:'',newCollectionName:''};
+ return {bill:'',liquor:'',settled:false,attendees:null,noAlcohol:null,collectionNames:null,collectionAmount:'',payment:null,collectionVisible:index===0,collectionOpen:index===0,rosterOpen:false,newAttendee:'',newCollectionName:''};
 }
 function freshState(){return {version:1,mode:'direct',ppl:'4',base:'30000',account:'',nicknames:['','','',''],nicknamesOpen:true,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
 let S=freshState();
@@ -246,6 +262,7 @@ function normalizeState(raw){
  state.rounds=raw.rounds.map((r,i)=>{
   if(!r||typeof r!=='object') throw Error('invalid round');
   const round=freshRound(i);
+  round.settled=r.settled===true;
   for(const key of ['bill','liquor','collectionAmount']) round[key]=str(r[key],24);
   for(const key of ['newAttendee','newCollectionName']) round[key]=str(r[key],1000);
   for(const key of ['attendees','noAlcohol','collectionNames']) round[key]=list(r[key],true);
@@ -353,7 +370,8 @@ function buildRounds(){
  let bills='',collections='';
  for(let n=1;n<=4;n++){
   bills+='<div class="rd" id="r'+n+'"><div class="rr bill-row"><label for="b'+n+'"><b>'+n+'차</b></label><input type="text" id="b'+n+'" placeholder="계산서 총액" aria-label="'+n+'차 계산서 총액" inputmode="numeric" pattern="[0-9]*"></div>'
-   +'<div class="round-roster lb" id="roundStatus'+n+'"></div>';
+   +'<div class="round-roster lb" id="roundStatus'+n+'"></div>'
+   +'<label class="tg settled-toggle"><input type="checkbox" id="settled'+n+'" aria-label="'+n+'차 정산 완료"> 정산 완료</label>';
   if(n>1){
    bills+='<details id="rosterEdit'+n+'" class="round-roster-edit"><summary>명단 수정</summary>'+pickerHtml('actual',n)+'</details>';
    collections+='<details class="collection-round" id="prepayRound'+n+'" hidden><summary><span id="collectionSummary'+n+'"></span><span class="summary-action">보기 / 수정</span></summary><div class="collection-body">'
@@ -370,6 +388,7 @@ function buildRounds(){
 function putValue(id,value){if($(id).value!==value) $(id).value=value;}
 function renderNicknames(){
  const payment=S.rounds[0].payment;
+ const locked=Boolean(payment)||S.rounds[0].settled;
  const count=payment?payment.names.length:amount(S.ppl,1,100)??0;
  const container=$('nicknames');
  while(S.nicknames.length<count) S.nicknames.push('');
@@ -377,11 +396,11 @@ function renderNicknames(){
   const i=container.children.length;
   const input=document.createElement('input');input.type='text';input.id='nickname'+(i+1);input.placeholder='닉네임 '+(i+1);input.autocomplete='off';input.maxLength=80;input.required=true;
   input.setAttribute('aria-label','참석자 '+(i+1)+' 닉네임');
-  input.addEventListener('input',()=>{if(!S.rounds[0].payment){S.nicknames[i]=input.value;refresh();}});
+  input.addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S.nicknames[i]=input.value;refresh();}});
   container.appendChild(input);
  }
- Array.from(container.children).forEach((input,i)=>{input.hidden=i>=count;input.disabled=Boolean(payment);const value=payment?.names[i]??S.nicknames[i]??'';if(input.value!==value) input.value=value;});
- container.disabled=Boolean(payment);
+ Array.from(container.children).forEach((input,i)=>{input.hidden=i>=count;input.disabled=locked;const value=payment?.names[i]??S.nicknames[i]??'';if(input.value!==value) input.value=value;});
+ container.disabled=locked;
  $('nicknameOptions').hidden=!S.nicknamesOpen;
  $('toggleNicknames').textContent=S.nicknamesOpen?'−':'+';
  $('toggleNicknames').setAttribute('aria-expanded',String(S.nicknamesOpen));
@@ -406,6 +425,7 @@ function renderChoices(id,options,selected,disabled,onChange){
 }
 function setRoster(kind,number,names){
  const r=S.rounds[number-1];
+ if(r.settled) return;
  if(kind==='collection'){
   if(r.payment) return;
   r.collectionNames=[...names];r.attendees=[...names];
@@ -420,7 +440,7 @@ function toggleRoster(kind,number,name,checked){
  setRoster(kind,number,selected);refresh();
 }
 function addPerson(kind,number){
- const r=S.rounds[number-1];if(kind==='collection'&&r.payment) return;
+ const r=S.rounds[number-1];if(r.settled||(kind==='collection'&&r.payment)) return;
  const key=kind==='collection'?'newCollectionName':'newAttendee';
  const added=r[key].split(/[,\n]/).map(name=>name.trim()).filter(Boolean);
  const id=(kind==='collection'?'prepayNames':'names')+number;
@@ -436,19 +456,19 @@ function renderCollection(number){
  box.hidden=!r.collectionVisible||(isDirect()&&number>1);box.open=isDirect()&&number===1?true:r.collectionOpen;
  $('collectionSummary'+number).textContent=payment?number+'차 · '+payment.names.length+'명 · 받은 회비 '+won(payment.amount*payment.names.length):number+'차 · 회비 걷기';
  $('prepayConfirmed'+number).checked=Boolean(payment);
- $('prepayConfirmed'+number).disabled=captureBusy;
+ $('prepayConfirmed'+number).disabled=captureBusy||r.settled;
  $('paymentHint'+number).textContent=payment?'입금 확인 완료 · 금액이나 명단을 고치려면 확인을 해제해 주세요.':'실제로 모두 입금했을 때 체크해 주세요.';
  if(number===1){
   putValue('ppl',S.ppl);putValue('base',S.base);putValue('acct',S.account);
-  $('ppl').disabled=$('base').disabled=Boolean(payment);
+  $('ppl').disabled=$('base').disabled=Boolean(payment)||r.settled;
   renderNicknames();
   const info=feeInfo();$('fee').textContent=info?won(info.fee):'-';$('tot').textContent=info?won(info.fee*info.ppl):'-';
  }else{
   const id='prepayNames'+number;
-  renderChoices(id,knownNames(),collectionNames(number),Boolean(payment),(name,on)=>toggleRoster('collection',number,name,on));
-  putValue(id+'New',r.newCollectionName);$(id+'New').disabled=$(id+'Add').disabled=Boolean(payment);
-  putValue('prepayAmount'+number,payment?String(payment.amount):r.collectionAmount);$('prepayAmount'+number).disabled=Boolean(payment);
-  $('removePrepay'+number).disabled=Boolean(payment);
+  renderChoices(id,knownNames(),collectionNames(number),Boolean(payment)||r.settled,(name,on)=>toggleRoster('collection',number,name,on));
+  putValue(id+'New',r.newCollectionName);$(id+'New').disabled=$(id+'Add').disabled=Boolean(payment)||r.settled;
+  putValue('prepayAmount'+number,payment?String(payment.amount):r.collectionAmount);$('prepayAmount'+number).disabled=Boolean(payment)||r.settled;
+  $('removePrepay'+number).disabled=Boolean(payment)||r.settled;
  }
 }
 function renderRounds(){
@@ -460,17 +480,20 @@ function renderRounds(){
  for(let n=1;n<=4;n++){
   const r=S.rounds[n-1],names=roster(n),noAlcohol=noAlcoholNames(n);
   $('r'+n).hidden=n>S.lastRound;putValue('b'+n,r.bill);putValue('k'+n,r.liquor);
+  $('r'+n).classList.toggle('settled',r.settled);$('settled'+n).checked=r.settled;
+  $('b'+n).disabled=$('k'+n).disabled=r.settled;
   const status=r.payment?(n===1?'회비 반영':'선입금 반영'):n===1?'입금 확인 전':r.collectionVisible&&r.collectionAmount?'입금 확인 전':'선입금 없음';
-  $('roundStatus'+n).textContent=names.length+'명'+(isDirect()?'':' · '+status);
+  $('roundStatus'+n).textContent=names.length+'명'+(r.settled?' · 정산 완료 · 이번 계산에서 제외':isDirect()?'':' · '+status);
   $('noAlcoholBlock'+n).hidden=!S.dOn;
-  renderChoices('noAlcohol'+n,names,noAlcohol,false,(name,on)=>{
+  renderChoices('noAlcohol'+n,names,noAlcohol,r.settled,(name,on)=>{
    const chosen=noAlcoholNames(n);r.noAlcohol=on?[...new Set([...chosen,name])]:chosen.filter(value=>value!==name);refresh();
   });
   $('drinkCount'+n).textContent='음주 '+(names.length-noAlcohol.length)+'명 · 노술 '+noAlcohol.length+'명';
   if(n>1){
    $('rosterEdit'+n).open=r.rosterOpen;
-   renderChoices('names'+n,knownNames(),names,false,(name,on)=>toggleRoster('actual',n,name,on));
+   renderChoices('names'+n,knownNames(),names,r.settled,(name,on)=>toggleRoster('actual',n,name,on));
    putValue('names'+n+'New',r.newAttendee);
+   $('names'+n+'New').disabled=$('names'+n+'Add').disabled=r.settled;
   }
  }
 }
@@ -489,6 +512,7 @@ function renderMode(){
  $('addPrepay').hidden=direct||S.rounds.slice(1).every(r=>r.collectionVisible);
 }
 function refresh(save=true){
+ clearCaptureReview();
  clearWarnings();$('message').hidden=true;
  for(let n=1;n<=4;n++) renderCollection(n);
  renderRounds();syncCaptureButtons();
@@ -546,6 +570,33 @@ async function loadCaptureImage(file){
   throw captureError('IMG-DECODE');
  }
 }
+function removeCaptureBadges(data,width,height){
+ // Remove compact blue-gray self badges, not neighboring black nickname text.
+ const strip=Math.ceil(width*.2),mask=new Uint8Array(strip*height),queue=new Uint32Array(mask.length);
+ for(let y=0;y<height;y++) for(let x=0;x<strip;x++){
+  const p=(y*width+x)*4,r=data[p],g=data[p+1],b=data[p+2];
+  if(r>=40&&b<=150&&g>=r&&b>=g&&b-r>=10) mask[y*strip+x]=1;
+ }
+ let removed=0;
+ for(let start=0;start<mask.length;start++){
+  if(!mask[start]) continue;
+  let head=0,tail=1,minX=strip,maxX=0,minY=height,maxY=0;
+  queue[0]=start;mask[start]=0;
+  const visit=p=>{if(mask[p]){mask[p]=0;queue[tail++]=p;}};
+  while(head<tail){
+   const p=queue[head++],x=p%strip,y=Math.floor(p/strip);
+   minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
+   if(x) visit(p-1);if(x+1<strip) visit(p+1);if(y) visit(p-strip);if(y+1<height) visit(p+strip);
+  }
+  const w=maxX-minX+1,h=maxY-minY+1;
+  if(w<width*.04||w>width*.17||w/h<.7||w/h>1.3||tail/(w*h)<=.55) continue;
+  for(let y=Math.max(0,minY-2);y<=Math.min(height-1,maxY+2);y++) for(let x=Math.max(0,minX-2);x<=Math.min(width-1,maxX+2);x++){
+   const p=(y*width+x)*4;data[p]=data[p+1]=data[p+2]=255;
+  }
+  removed++;
+ }
+ return removed;
+}
 async function captureImageBytes(file){
  const image=await loadCaptureImage(file);
  let canvas;
@@ -565,6 +616,8 @@ async function captureImageBytes(file){
   context.fillRect(0,0,canvas.width,canvas.height);
   context.imageSmoothingQuality='high';
   context.drawImage(image,left,0,width,height,0,0,canvas.width,canvas.height);
+  const pixels=context.getImageData(0,0,canvas.width,canvas.height);
+  if(removeCaptureBadges(pixels.data,canvas.width,canvas.height)) context.putImageData(pixels,0,0);
   const png=await new Promise((resolve,reject)=>{
    canvas.toBlob(blob=>blob?resolve(blob):reject(captureError('IMG-MEMORY')),'image/png');
   });
@@ -673,15 +726,32 @@ function renderBalance(label,balance,separatePayment=false,roundCosts=''){
 
 function ro(s){const c=s.charCodeAt(s.length-1); if(c>=0xAC00&&c<=0xD7A3){const j=(c-0xAC00)%28; return (j===0||j===8)?'로':'으로';} return '2459'.includes(s[s.length-1])?'로':'으로';}
 
+function settlementRound(n,report=false){
+ const r=S.rounds[n-1],names=roster(n),bill=amount(r.bill),liquor=S.dOn&&r.liquor!==''?amount(r.liquor):0;
+ if(!validNames(names)){if(report){warn(n+'차 참석자를 1~100명 선택해 주세요.');if(n>1){r.rosterOpen=true;$('rosterEdit'+n).open=true;}}return;}
+ if(bill===null){if(report){warn(n+'차 계산서 금액을 숫자로 입력해 주세요.');$('b'+n).focus();}return;}
+ if(liquor===null||liquor>bill){if(report){warn(n+'차 술값은 계산서 총액 이하의 숫자로 입력해 주세요.');$('k'+n).focus();}return;}
+ const noAlcohol=S.dOn?noAlcoholNames(n):[];
+ if(liquor>0&&noAlcohol.length===names.length){if(report) warn(n+'차 술값이 있지만 술 마신 사람이 없어요. 노술 선택을 확인해 주세요.');return;}
+ return {number:n,names,bill,liquor,noAlcohol};
+}
+function toggleSettled(number,checked){
+ if(checked&&(!firstParticipants(true)||!settlementRound(number,true))){$('settled'+number).checked=false;return;}
+ S.rounds[number-1].settled=checked;
+ captureRevision++;refresh();
+}
 function calculate(report=false){
  $('res').innerHTML='';
  if(!firstParticipants(report)) return;
  const payments=[];
  if(!isDirect()){
-  if(!firstPaymentDraft(report)) return;
-  if(!S.rounds[0].payment){if(report) collectionError(1,'1차 회비를 모두 받았다면 전원 입금 확인을 체크해 주세요.','prepayConfirmed1');return;}
+  if(!S.rounds[0].settled){
+   if(!firstPaymentDraft(report)) return;
+   if(!S.rounds[0].payment){if(report) collectionError(1,'1차 회비를 모두 받았다면 전원 입금 확인을 체크해 주세요.','prepayConfirmed1');return;}
+  }
   for(let n=1;n<=4;n++){
    const r=S.rounds[n-1];
+   if(r.settled) continue;
    if(r.payment){
     if(n>S.lastRound){if(report) warn(n+'차에 받은 회비가 있어요. '+n+'차까지 정산해 주세요.');return;}
     payments.push({number:n,names:r.payment.names,amount:r.payment.amount});
@@ -693,14 +763,11 @@ function calculate(report=false){
  }
  const rounds=[];
  for(let n=1;n<=S.lastRound;n++){
-  const r=S.rounds[n-1],names=roster(n),bill=amount(r.bill),liquor=S.dOn&&r.liquor!==''?amount(r.liquor):0;
-  if(!validNames(names)){if(report){warn(n+'차 참석자를 1~100명 선택해 주세요.');if(n>1){r.rosterOpen=true;$('rosterEdit'+n).open=true;}}return;}
-  if(bill===null){if(report){warn(n+'차 계산서 금액을 숫자로 입력해 주세요.');$('b'+n).focus();}return;}
-  if(liquor===null||liquor>bill){if(report){warn(n+'차 술값은 계산서 총액 이하의 숫자로 입력해 주세요.');$('k'+n).focus();}return;}
-  const noAlcohol=S.dOn?noAlcoholNames(n):[];
-  if(liquor>0&&noAlcohol.length===names.length){if(report) warn(n+'차 술값이 있지만 술 마신 사람이 없어요. 노술 선택을 확인해 주세요.');return;}
-  rounds.push({number:n,names,bill,liquor,noAlcohol});
+  if(S.rounds[n-1].settled) continue;
+  const round=settlementRound(n,report);if(!round) return;
+  rounds.push(round);
  }
+ if(!rounds.length){if(report) warn('선택한 차수는 모두 정산 완료됐어요. 다음 차수를 선택하거나 정산 완료 체크를 해제해 주세요.');return;}
  return settleByPerson(rounds,payments,S.account.trim());
 }
 function settleByPerson(rounds,payments,account){
@@ -751,7 +818,7 @@ function settleByPerson(rounds,payments,account){
 }
 function showMessage(section,message){$(section).after($('message'));$('msg').textContent=message;$('cp').textContent='문구 복사';$('message').hidden=false;$('message').scrollIntoView({block:'start'});}
 function togglePayment(number,checked){
- if(isDirect()) return;
+ if(isDirect()||S.rounds[number-1].settled) return;
  const r=S.rounds[number-1];
  if(checked){
   const draft=paymentDraft(number,true);
@@ -770,7 +837,7 @@ function addCollection(){
  S.lastRound=Math.max(S.lastRound,index+1);refresh();$('prepayRound'+(index+1)).scrollIntoView({block:'nearest'});
 }
 function removeCollection(number){
- const r=S.rounds[number-1];if(number===1||r.payment) return;
+ const r=S.rounds[number-1];if(number===1||r.payment||r.settled) return;
  if(r.collectionAmount.trim()&&!confirm(number+'차 회비 입력을 삭제할까요? 아래 계산서와 참석자 명단은 유지돼요.')) return;
  r.collectionVisible=false;r.collectionOpen=false;r.collectionNames=null;r.collectionAmount='';r.newCollectionName='';
  // Removing a trial card also rolls back unused settlement rounds, without renumbering any recorded round.
@@ -782,11 +849,50 @@ function removeCollection(number){
  captureRevision++;refresh();
 }
 function captureLocked(id){
- if(id==='nicknames') return Boolean(S.rounds[0].payment);
+ if(id==='nicknames') return Boolean(S.rounds[0].payment)||S.rounds[0].settled;
+ const number=Number(id.slice(-1));if(S.rounds[number-1]?.settled) return true;
  const match=id.match(/^prepayNames([2-4])$/);
  return match?Boolean(S.rounds[Number(match[1])-1].payment):false;
 }
 function syncCaptureButtons(){document.querySelectorAll('[data-capture]').forEach(button=>{button.disabled=captureBusy||captureLocked(button.dataset.capture);});renderMode();}
+function captureRoster(id){return id==='nicknames'?firstNames():id.startsWith('prepay')?collectionNames(Number(id.slice(-1))):roster(Number(id.slice(-1)));}
+function clearCaptureReview(){
+ if(captureReview){const id=captureReview.id;$(id==='nicknames'?'captureStatus':id+'CaptureStatus').textContent='';}
+ captureReview=null;$('captureReview').hidden=true;
+}
+function updateCaptureReview(){
+ if(!captureReview) return;
+ const {id,names}=captureReview,clean=names.map(name=>name.trim()),known=knownNames();
+ const added=clean.filter(name=>name&&!known.includes(name)),removed=captureRoster(id).filter(name=>!clean.includes(name));
+ $('captureReviewChanges').textContent=[added.length?'새 이름: '+added.join(', '):'',removed.length?'이 명단에서 빠질 사람: '+removed.join(', '):''].filter(Boolean).join('\n');
+}
+function reviewCapture(id,names){
+ const previous=captureRoster(id);
+ if(!previous.length||(previous.length===names.length&&previous.every(name=>names.includes(name)))) return false;
+ captureReview={id,names:[...names],revision:captureRevision};
+ const list=$('captureReviewList');list.innerHTML='';
+ names.forEach((name,i)=>{
+  const label=document.createElement('label');label.textContent=(i+1)+'번 닉네임';
+  const input=document.createElement('input');input.type='text';input.value=name;input.maxLength=80;input.autocomplete='off';
+  input.addEventListener('input',()=>{if(captureReview){captureReview.names[i]=input.value;updateCaptureReview();}});
+  label.appendChild(input);list.appendChild(label);
+ });
+ const status=$(id==='nicknames'?'captureStatus':id+'CaptureStatus');
+ status.after($('captureReview'));$('captureReviewError').hidden=true;$('captureReview').hidden=false;
+ updateCaptureReview();return true;
+}
+function applyCaptureNames(id,names){
+ if(id==='nicknames'){S.ppl=String(names.length);S.nicknames=[...names];S.nicknamesOpen=true;}
+ else setRoster(id.startsWith('prepay')?'collection':'actual',Number(id.slice(-1)),names);
+ refresh();$(id==='nicknames'?'captureStatus':id+'CaptureStatus').textContent=names.length+'명의 닉네임을 적용했어요.';
+}
+function confirmCaptureReview(){
+ if(!captureReview) return;
+ const {id,names,revision}=captureReview,clean=names.map(name=>name.trim());
+ if(revision!==captureRevision||captureLocked(id)){clearCaptureReview();return;}
+ if(!validNames(clean)){warn('빈칸이나 중복 없이 닉네임을 적어 주세요.','captureReviewError');return;}
+ clearCaptureReview();applyCaptureNames(id,clean);
+}
 async function handleCapture(event){
  const files=Array.from(event.target.files||[]);event.target.value='';
  const id=captureTarget;if(!files.length||captureBusy||captureLocked(id)) return;
@@ -795,6 +901,7 @@ async function handleCapture(event){
  const file=files[0];
  if(file.size>25*1024*1024){status.textContent='25MB 이하의 캡처 이미지를 선택해 주세요.';return;}
  const revision=captureRevision;
+ clearCaptureReview();
  captureBusy=true;syncCaptureButtons();
  for(let n=1;n<=4;n++) $('prepayConfirmed'+n).disabled=true;
  try{
@@ -802,13 +909,13 @@ async function handleCapture(event){
   if(revision!==captureRevision||captureLocked(id)) return;
   if(!names.length){status.textContent='닉네임을 찾지 못했어요. 참여자 목록이 선명한 캡처를 선택해 주세요.';return;}
   if(names.length>100){status.textContent='한 번에 100명 이하가 보이는 캡처를 선택해 주세요.';return;}
-  if(first){S.ppl=String(names.length);S.nicknames=[...names];S.nicknamesOpen=true;}
-  else{const n=Number(id.slice(-1));setRoster(id.startsWith('prepay')?'collection':'actual',n,[...new Set(names)]);}
-  refresh();status.textContent=names.length+'명의 닉네임을 채웠어요. 실제 참석자와 오타를 확인해 주세요.';
+  if(reviewCapture(id,names)){status.textContent=names.length+'명을 읽었어요. 이름을 확인한 뒤 명단 적용을 눌러 주세요.';return;}
+  if(!validNames(names)){status.textContent='중복되거나 잘못 읽힌 이름이 있어요. 닉네임을 직접 확인해 주세요.';return;}
+  applyCaptureNames(id,names);
  }catch(error){
   if(revision===captureRevision){if(first){S.nicknamesOpen=true;renderNicknames();saveState();}status.textContent=captureErrorMessage(error,file);}
  }finally{
-  captureBusy=false;syncCaptureButtons();for(let n=1;n<=4;n++) $('prepayConfirmed'+n).disabled=false;
+  captureBusy=false;syncCaptureButtons();for(let n=1;n<=4;n++) $('prepayConfirmed'+n).disabled=S.rounds[n-1].settled;
  }
 }
 function resetMeeting(){
@@ -819,9 +926,11 @@ function resetMeeting(){
  refresh();$('ppl').focus();
 }
 function bindEvents(){
+ $('applyCapture').addEventListener('click',confirmCaptureReview);
+ $('cancelCapture').addEventListener('click',()=>{const id=captureReview?.id;clearCaptureReview();if(id) $(id==='nicknames'?'captureStatus':id+'CaptureStatus').textContent='기존 명단을 유지했어요.';});
  document.querySelectorAll('#settlementMode button').forEach(button=>button.addEventListener('click',()=>setMode(button.dataset.mode)));
  $('resetMeeting').addEventListener('click',resetMeeting);
- ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment){S[id]=$(id).value;refresh();}}));
+ ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S[id]=$(id).value;refresh();}}));
  $('acct').addEventListener('input',()=>{S.account=$('acct').value;refresh();});
  $('toggleNicknames').addEventListener('click',()=>{S.nicknamesOpen=!S.nicknamesOpen;renderNicknames();saveState();});
  $('addPrepay').addEventListener('click',addCollection);
@@ -829,6 +938,7 @@ function bindEvents(){
  document.querySelectorAll('#seg button').forEach(button=>button.addEventListener('click',()=>{if(!button.disabled){S.lastRound=Number(button.dataset.r);refresh();}}));
  for(let n=1;n<=4;n++){
   const r=()=>S.rounds[n-1];
+  $('settled'+n).addEventListener('change',()=>toggleSettled(n,$('settled'+n).checked));
   $(n===1?'collectionRound1':'prepayRound'+n).addEventListener('toggle',event=>{if(!(isDirect()&&n===1)&&r().collectionOpen!==event.target.open){r().collectionOpen=event.target.open;saveState();}});
   $('prepayConfirmed'+n).addEventListener('change',()=>togglePayment(n,$('prepayConfirmed'+n).checked));
   $('b'+n).addEventListener('input',()=>{r().bill=$('b'+n).value;refresh();});

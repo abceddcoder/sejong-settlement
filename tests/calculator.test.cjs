@@ -10,6 +10,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담') {
   const rows = [], workers = [];
   const elements = {};
+  const element = () => ({ children: [], classList: { toggle() {} }, focus() {}, after() {}, addEventListener() {}, appendChild(child) { this.children.push(child); } });
   class Worker {
     constructor(url) { this.url = url; workers.push(this); }
     postMessage(message) {
@@ -23,17 +24,17 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
     terminate() { this.terminated = true; }
   }
   const context = vm.createContext({
-    document: { getElementById: id => elements[id] ||= { classList: { toggle() {} }, focus() {} }, querySelectorAll: () => [] },
+    document: { getElementById: id => elements[id] ||= element(), querySelectorAll: () => [], createElement: element },
     location: { protocol: 'https:' }, WebAssembly: {}, Worker,
     setTimeout, clearTimeout, rows,
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
-  vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=renderNicknames=saveState=()=>{};', context);
-  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
+  vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=()=>clearCaptureReview(); renderNicknames=saveState=()=>{};', context);
+  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
-  assert.ok(Buffer.byteLength(html) < 60000);
+  assert.ok(Buffer.byteLength(html) < 65000);
   assert.doesNotMatch(html, /ocrWorkerSource|id="ocrApi"|<script[^>]+src=|rel="(?:preload|prefetch)"/);
   assert.match(html, /property="og:description" content="회비 걷기부터/);
   assert.match(html, /:root\{color-scheme:dark;/);
@@ -121,6 +122,8 @@ test('a later capture selects matching and new attendees without changing earlie
   state.rounds[1].collectionNames = [...state.nicknames];
   api.target('prepayNames2');
   await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
+  assert.deepEqual(Array.from(state.rounds[1].collectionNames), ['sample1', 'sample2', 'sample3', 'sample4']);
+  api.confirmCaptureReview();
   assert.deepEqual(Array.from(state.rounds[1].collectionNames), ['sample1', 'sample2', 'sample5']);
   assert.deepEqual(Array.from(state.rounds[1].attendees), ['sample1', 'sample2', 'sample5']);
   assert.deepEqual(Array.from(state.rounds[0].payment.names), ['sample1', 'sample2', 'sample3', 'sample4']);
@@ -250,4 +253,90 @@ test('direct mode hides the collection controls and clearly labels the required 
   api.renderMode();
   assert.equal(elements.estimateRow.hidden, false);
   assert.equal(elements.firstPaymentControls.hidden, false);
+});
+
+test('self-badge preprocessing preserves nearby nickname strokes and non-circular marks', () => {
+  const { api } = calculator();
+  const width = 400, height = 160, pixels = new Uint8ClampedArray(width * height * 4).fill(255);
+  const set = (x, y, color) => pixels.set([...color, 255], (y * width + x) * 4);
+  for (let y = 20; y < 60; y++) for (let x = 10; x < 50; x++) {
+    if ((x - 30) ** 2 + (y - 40) ** 2 <= 15 ** 2) set(x, y, [86, 94, 111]);
+  }
+  set(55, 40, [30, 30, 30]);
+  for (let x = 10; x < 70; x++) for (let y = 90; y < 94; y++) set(x, y, [86, 94, 111]);
+  assert.equal(api.removeCaptureBadges(pixels, width, height), 1);
+  assert.equal(pixels[(40 * width + 30) * 4], 255);
+  assert.equal(pixels[(40 * width + 55) * 4], 30);
+  assert.equal(pixels[(90 * width + 30) * 4], 86);
+});
+
+test('an OCR typo cannot create a new attendee or uncheck an existing one before review', async () => {
+  const { api, elements } = calculator(false, 'sampleI/93/남/종촌\nsample2/92/여/도담');
+  const state = api.state();
+  state.ppl = '2'; state.nicknames = ['sample1', 'sample2'];
+  const before = JSON.stringify(state);
+  api.target('names2');
+  await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
+  assert.equal(JSON.stringify(state), before);
+  assert.match(elements.captureReviewChanges.textContent, /새 이름: sampleI/);
+  assert.match(elements.captureReviewChanges.textContent, /빠질 사람: sample1/);
+  api.pendingReview().names[0] = 'sample1';
+  api.confirmCaptureReview();
+  assert.deepEqual(Array.from(state.rounds[1].attendees), ['sample1', 'sample2']);
+  assert.ok(!state.people.includes('sampleI'));
+});
+
+test('invalid or cancelled capture review never changes the saved roster', async () => {
+  const { api, elements } = calculator(false, 'sample1/93/남/종촌\nsample3/92/여/도담');
+  const state = api.state(); state.ppl = '2'; state.nicknames = ['sample1', 'sample2'];
+  const before = JSON.stringify(state);
+  api.target('names2');
+  await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
+  api.pendingReview().names[1] = 'sample1';
+  api.confirmCaptureReview();
+  assert.equal(elements.captureReviewError.hidden, false);
+  assert.equal(JSON.stringify(state), before);
+  api.clearCaptureReview();
+  api.confirmCaptureReview();
+  assert.equal(JSON.stringify(state), before);
+});
+
+test('all combinations of completed rounds exclude only those rounds and their payments', () => {
+  for (const mode of ['direct', 'prepay']) for (let mask = 0; mask < 16; mask++) {
+    const { api, rows, elements } = calculator();
+    const state = api.state();
+    Object.assign(state, { mode, ppl: '2', nicknames: ['sample1', 'sample2'], lastRound: 4 });
+    let expectedCost = 0, expectedPaid = 0;
+    for (let i = 0; i < 4; i++) {
+      const r = state.rounds[i]; r.bill = String((i + 1) * 20000);
+      if (mode === 'prepay') r.payment = api.freezePayment(state.nicknames, (i + 1) * 12000);
+      api.toggleSettled(i + 1, Boolean(mask & (1 << i)));
+      if (!r.settled) { expectedCost += (i + 1) * 10000; expectedPaid += mode === 'prepay' ? (i + 1) * 12000 : 0; }
+    }
+    const message = api.calculate(true);
+    if (mask === 15) {
+      assert.equal(message, undefined);
+      assert.match(elements.warn.textContent, /모두 정산 완료/);
+    } else {
+      assert.deepEqual(rows.map(row => row[1]), [expectedPaid - expectedCost, expectedPaid - expectedCost]);
+      for (let n = 1; n <= 4; n++) assert.equal(message.includes(n + '차 2명'), !(mask & (1 << (n - 1))));
+    }
+    const restored = api.normalizeState(JSON.parse(JSON.stringify(state)));
+    assert.deepEqual(Array.from(restored.rounds, r => r.settled), Array.from(state.rounds, r => r.settled));
+  }
+});
+
+test('completion is reversible, requires a valid receipt, and protects completed rosters', () => {
+  const { api, elements, rows } = calculator();
+  const state = api.state(); state.ppl = '2'; state.nicknames = ['sample1', 'sample2'];
+  api.toggleSettled(1, true);
+  assert.equal(state.rounds[0].settled, false);
+  assert.match(elements.warn.textContent, /계산서 금액/);
+  state.rounds[0].bill = '20000';
+  api.toggleSettled(1, true);
+  assert.equal(api.captureLocked('nicknames'), true);
+  api.toggleSettled(1, false);
+  assert.equal(api.captureLocked('nicknames'), false);
+  api.calculate();
+  assert.deepEqual(rows.map(row => row[1]), [-10000, -10000]);
 });
