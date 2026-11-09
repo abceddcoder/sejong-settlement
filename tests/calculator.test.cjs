@@ -10,7 +10,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담') {
   const rows = [], workers = [];
   const elements = {};
-  const element = () => ({ children: [], style: {}, classList: { toggle() {} }, focus() {}, after() {}, setAttribute() {}, addEventListener() {}, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
+  const element = () => ({ children: [], style: {}, classList: { toggle() {} }, focus() {}, after() {}, setAttribute() {}, addEventListener() {}, replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
   class Worker {
     constructor(url) { this.url = url; workers.push(this); }
     postMessage(message) {
@@ -30,11 +30,12 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
   vm.runInContext('const renderBalanceUI=renderBalance,renderNicknamesUI=renderNicknames; renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=()=>clearCaptureReview(); renderNicknames=saveState=()=>{};', context);
-  return { api: vm.runInContext('({renderBalanceUI,renderNicknamesUI,roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
+  return { api: vm.runInContext('({setPayer,renderPayer,payerNames,renderBalanceUI,renderNicknamesUI,roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
-  assert.ok(Buffer.byteLength(html.replace(/\r\n/g, '\n')) < 65000);
+  // Keep the calculator small as payer selection is added; OCR remains lazy-loaded.
+  assert.ok(Buffer.byteLength(html.replace(/\r\n/g, '\n')) < 70000);
   assert.doesNotMatch(html, /ocrWorkerSource|id="ocrApi"|<script[^>]+src=|rel="(?:preload|prefetch)"/);
   assert.match(html, /property="og:description" content="회비 걷기부터/);
   assert.match(html, /:root\{color-scheme:dark;/);
@@ -171,8 +172,8 @@ test('direct settlement needs no estimate, buffer, or payment confirmation', () 
   assert.deepEqual(rows.map(row => row[1]), [-25000, -25000, -25000, -25000]);
   assert.ok(rows.every(row => row[2].includes('1차 25,000원')));
   assert.match(message, /1차 4명 · 계산서 100,000원/);
-  assert.doesNotMatch(message, /받은 회비|낸 회비|환불/);
-  assert.match(message, /4명 모두 1인 25,000원씩 추가 입금해 주세요\./);
+  assert.doesNotMatch(message, /받은 회비|낸 회비|환불|추가 입금/);
+  assert.match(message, /4명 모두 1인 25,000원씩 보내주세요\.$/);
 });
 
 test('direct settlement still handles alcohol exclusions and later arrivals', () => {
@@ -345,6 +346,7 @@ test('completion is reversible, requires a valid receipt, and protects completed
 
 test('equal final deposits collapse to one chat line while individual screen results remain', () => {
   const { api, rows } = calculator();
+  api.setMode('prepay');
   const names = Array.from({ length: 10 }, (_, i) => 'sample' + (i + 1));
   const message = api.settleByPerson([{ number: 1, names, bill: 55000, liquor: 0, noAlcohol: [] }], [], 'sample계좌');
   assert.equal(message.split('\n').filter(line => line.includes('모두')).join('\n'), '10명 모두 1인 5,500원씩 추가 입금해 주세요.');
@@ -441,4 +443,123 @@ test('confirmed nickname lists hide the hint while keeping the fields locked and
   api.renderNicknamesUI();
   assert.equal(elements.nicknameHint.hidden, true);
   assert.ok(elements.nicknames.children.every(input => input.disabled && input.required));
+});
+
+test('direct settlement lists unequal amounts without prepayment wording on screen or in chat', () => {
+  const { api, rows, elements } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'], lastRound: 2, account: 'sample계좌' });
+  state.rounds[0].bill = '10000';
+  Object.assign(state.rounds[1], { bill: '3000', attendees: ['sample1'] });
+  const message = api.calculate();
+  assert.deepEqual(message.split('\n').filter(line => line.startsWith('· ')), ['· sample1 8,000원', '· sample2 5,000원']);
+  assert.match(message, /입금 계좌: sample계좌/);
+  assert.match(message, /위 금액을 보내주세요\.$/);
+  assert.doesNotMatch(message, /추가 입금|환불|돌려|명 모두/);
+  for (const row of rows) api.renderBalanceUI(...row);
+  assert.deepEqual(elements.res.children.map(row => row.children[1].textContent), ['8,000원', '5,000원']);
+});
+
+test('a selected payer keeps their share but is excluded from the senders and grouped amount', () => {
+  const { api, rows, elements } = calculator();
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4']; state.rounds[0].bill = '22000';
+  api.setPayer('sample1');
+  const message = api.calculate();
+  assert.deepEqual(rows.map(row => row[1]), [0, -5500, -5500, -5500]);
+  assert.match(rows[0][0], /부담액 5,500원/);
+  assert.equal(rows[0][3], true);
+  assert.match(message, /· sample1 결제함\n3명 모두 1인 5,500원씩 보내주세요\.$/);
+  assert.doesNotMatch(message, /4명 모두|추가 입금|환불|· sample1 5,500원/);
+  for (const row of rows) api.renderBalanceUI(...row);
+  assert.deepEqual(elements.res.children.map(row => row.children[1].textContent), ['결제함', '5,500원', '5,500원', '5,500원']);
+  api.setPayer(''); rows.length = 0;
+  assert.match(api.calculate(), /4명 모두 1인 5,500원씩 보내주세요\.$/);
+  assert.ok(rows.every(row => row[1] === -5500 && row[3] === false));
+});
+
+test('unequal direct senders keep payer marking alongside individual amounts', () => {
+  const { api } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '3', nicknames: ['sample1', 'sample2', 'sample3'], lastRound: 2 });
+  state.rounds[0].bill = '15000';
+  Object.assign(state.rounds[1], { bill: '2000', attendees: ['sample2'] });
+  api.setPayer('sample1');
+  const message = api.calculate();
+  assert.deepEqual(message.split('\n').filter(line => line.startsWith('· ')), ['· sample1 결제함', '· sample2 7,000원', '· sample3 5,000원']);
+  assert.match(message, /위 금액을 보내주세요\.$/);
+});
+
+test('payer selection includes active later arrivals and clears when their round is completed', () => {
+  const { api, elements } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'], lastRound: 2 });
+  state.rounds[0].bill = '10000';
+  Object.assign(state.rounds[1], { bill: '20000', attendees: ['sample2', 'sample3'] });
+  api.renderPayer();
+  assert.deepEqual(elements.payer.children.map(option => option.value), ['', 'sample1', 'sample2', 'sample3']);
+  api.setPayer('sample3'); api.renderPayer();
+  assert.equal(elements.payer.value, 'sample3');
+  assert.match(api.calculate(), /· sample3 결제함/);
+  api.toggleSettled(2, true); api.renderPayer();
+  assert.equal(state.payer, '');
+  assert.deepEqual(elements.payer.children.map(option => option.value), ['', 'sample1', 'sample2']);
+  assert.doesNotMatch(api.calculate(), /결제함|sample3/);
+});
+
+test('renaming or removing a payer resets selection and unknown names cannot exclude a charge', () => {
+  const { api, rows, elements } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'] }); state.rounds[0].bill = '10000';
+  api.setPayer('sample1'); state.nicknames[0] = 'sample3'; api.renderPayer();
+  assert.equal(state.payer, '');
+  assert.equal(elements.payer.value, '');
+  api.setPayer('sample99');
+  assert.equal(state.payer, '');
+  api.calculate();
+  assert.deepEqual(rows.map(row => row[1]), [-5000, -5000]);
+  api.setPayer('sample2'); state.ppl = '1'; api.renderPayer();
+  assert.equal(state.payer, '');
+});
+
+test('prepayment ignores and hides direct payer selection while preserving refund calculations', () => {
+  const { api, rows, elements } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'] }); state.rounds[0].bill = '10000';
+  api.setPayer('sample1'); api.setMode('prepay'); api.renderPayer();
+  assert.equal(elements.payerField.hidden, true);
+  state.rounds[0].payment = api.freezePayment(state.nicknames, 6000);
+  const message = api.calculate();
+  assert.match(message, /2명 모두 1인 1,000원씩 환불해 드릴게요\./);
+  assert.doesNotMatch(message, /결제함/);
+  assert.deepEqual(rows.map(row => row[1]), [1000, 1000]);
+  for (const row of rows) api.renderBalanceUI(...row);
+  assert.ok(elements.res.children.every(row => row.children[1].textContent === '환불 1,000원'));
+  api.setPayer('sample2'); assert.equal(state.payer, 'sample1');
+});
+
+test('payer selection survives save restoration, defaults empty for older saves and resets for new meetings', () => {
+  const { api } = calculator();
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4']; api.setPayer('sample1');
+  const saved = JSON.parse(JSON.stringify(state));
+  assert.equal(api.normalizeState(saved).payer, 'sample1');
+  delete saved.payer;
+  assert.equal(api.normalizeState(saved).payer, '');
+  assert.equal(api.freshState().payer, '');
+  saved.payer = { name: 'sample1' };
+  assert.throws(() => api.normalizeState(saved));
+});
+
+test('a solo payer or a zero bill never gets an instruction to send money', () => {
+  const { api, rows } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '1', nicknames: ['sample1'] }); state.rounds[0].bill = '10000';
+  api.setPayer('sample1');
+  const message = api.calculate();
+  assert.match(message, /· sample1 결제함$/);
+  assert.doesNotMatch(message, /보내주세요|추가 입금|환불/);
+  assert.equal(rows[0][1], 0);
+  api.setPayer(''); state.rounds[0].bill = '0';
+  assert.match(api.calculate(), /1명 모두 1인 0원이에요\.$/);
 });

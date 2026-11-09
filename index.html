@@ -25,7 +25,8 @@ section{background:var(--card);border:1px solid var(--bd);border-radius:14px;pad
 h2{font-size:16px;font-weight:600;margin:0 0 12px}
 .row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .row label{font-size:14px;color:var(--tx2);min-width:96px}
-input,button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+input,button,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+#payerField{margin:12px 0;font-size:14px}#payer{width:100%;min-height:44px;margin-top:6px;font-size:16px}
 input[inputmode=numeric]{width:100%;min-width:0}
 #acct,#nicknames{flex:1;min-width:0}
 #nicknames{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
@@ -227,6 +228,7 @@ button:disabled{opacity:.55;cursor:default}
 </div>
 <label class="tg"><input type="checkbox" id="dOn"> 노술계산</label>
 <div id="rounds"></div>
+<div id="payerField"><label for="payer">결제한 사람 (선택)</label><select id="payer"><option value="">선택 안 함</option></select><p class="lb">선택한 사람은 ‘결제함’으로 표시하고 송금 안내에서 제외해요.</p></div>
 <p class="warn" id="warn" hidden role="alert"></p>
 <div id="res" style="margin-top:10px"></div>
 <button id="calculate" type="button">계산하기</button>
@@ -258,7 +260,7 @@ let captureTarget='nicknames',captureBusy=false,captureRevision=0,captureReview=
 function freshRound(index){
  return {bill:'',liquor:'',settled:false,attendees:null,noAlcohol:null,collectionNames:null,collectionAmount:'',payment:null,collectionVisible:index===0,collectionOpen:index===0,rosterOpen:false,newAttendee:'',newCollectionName:''};
 }
-function freshState(){return {version:1,mode:'direct',ppl:'4',base:'30000',account:'',nicknames:['','','',''],nicknamesOpen:true,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
+function freshState(){return {version:1,mode:'direct',ppl:'4',base:'30000',account:'',payer:'',nicknames:['','','',''],nicknamesOpen:true,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
 let S=freshState();
 const isDirect=()=>S.mode==='direct';
 function setMode(mode){
@@ -287,6 +289,7 @@ function normalizeState(raw){
   return value.map(name=>str(name));
  };
  state.ppl=str(raw.ppl,8);state.base=str(raw.base,24);state.account=str(raw.account,300);
+ state.payer=raw.payer===undefined?'':str(raw.payer);
  state.nicknames=list(raw.nicknames);state.people=list(raw.people,false,400);
  state.nicknamesOpen=raw.nicknamesOpen===true;state.dOn=raw.dOn===true;
  if(!Number.isInteger(raw.lastRound)||raw.lastRound<1||raw.lastRound>4) throw Error('invalid round');
@@ -544,11 +547,23 @@ function renderMode(){
  for(const id of ['firstCollectionSummary','estimateRow','feeEstimate','firstPaymentControls','prepayFields']) $(id).hidden=direct;
  $('addPrepay').hidden=direct||S.rounds.slice(1).every(r=>r.collectionVisible);
 }
+function payerNames(){return [...new Set(S.rounds.slice(0,S.lastRound).flatMap((round,i)=>round.settled?[]:roster(i+1)))];}
+function renderPayer(){
+ $('payerField').hidden=!isDirect();if(!isDirect())return;
+ const names=payerNames(),select=$('payer'),key=JSON.stringify(names);
+ if(!names.includes(S.payer))S.payer='';
+ if(select._namesKey!==key){
+  select._namesKey=key;select.replaceChildren();
+  for(const name of ['',...names]){const option=document.createElement('option');option.value=name;option.textContent=name||'선택 안 함';select.appendChild(option);}
+ }
+ putValue('payer',S.payer);
+}
+function setPayer(name){if(!isDirect()||(name!==''&&!payerNames().includes(name)))return;S.payer=name;refresh();}
 function refresh(save=true){
  clearCaptureReview();
  clearWarnings();$('message').hidden=true;
  for(let n=1;n<=4;n++) renderCollection(n);
- renderRounds();syncCaptureButtons();
+ renderRounds();renderPayer();syncCaptureButtons();
  calculate(false);
  if(save) saveState();
 }
@@ -731,8 +746,8 @@ function roundedCost(shares){
  const unit=denominator*100n;
  return Number((numerator+unit-1n)/unit*100n);
 }
-function balanceText(balance){return balance>0?'환불 '+won(balance):balance<0?'추가 입금 '+won(-balance):'정산 없음';}
-function renderBalance(label,balance,roundCosts=''){
+function balanceText(balance,paidBySelf=false){return paidBySelf?'결제함':isDirect()?won(Math.max(0,-balance)):balance>0?'환불 '+won(balance):balance<0?'추가 입금 '+won(-balance):'정산 없음';}
+function renderBalance(label,balance,roundCosts='',paidBySelf=false){
  const row=document.createElement('div');
  row.className='res';
  const description=document.createElement('span');
@@ -745,10 +760,19 @@ function renderBalance(label,balance,roundCosts=''){
  }
  const result=document.createElement('span');
  result.className='r';
- result.textContent=balanceText(balance);
- if(balance) result.style.color=balance>0?'var(--ok)':'var(--bad)';
+ result.textContent=balanceText(balance,paidBySelf);
+ if(balance||paidBySelf) result.style.color=paidBySelf||balance>0?'var(--ok)':'var(--bad)';
  row.append(description,result);
  $('res').appendChild(row);
+}
+function directSettlementText(balances,account){
+ const senders=balances.filter(item=>!item.paidBySelf),more=senders.some(item=>item.balance<0);
+ const same=senders.length>0&&senders.every(item=>item.balance===senders[0].balance);
+ const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf));
+ if(account&&more)lines.unshift('입금 계좌: '+account+'\n');
+ if(same)lines.push(senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.'));
+ else if(more)lines.push('\n위 금액을 보내주세요.');
+ return lines.join('\n');
 }
 
 function ro(s){const c=s.charCodeAt(s.length-1); if(c>=0xAC00&&c<=0xD7A3){const j=(c-0xAC00)%28; return (j===0||j===8)?'로':'으로';} return '2459'.includes(s[s.length-1])?'로':'으로';}
@@ -830,12 +854,13 @@ function settleByPerson(rounds,payments,account){
  for(const [name,shares] of costs){
   let amount=0;
   const details=shares.map(({number,share,noAlcohol})=>{const previous=Math.round(amount);amount+=share;return number+'차 '+won(Math.round(amount)-previous)+(noAlcohol?' (노술)':'');});
-  const cost=roundedCost(shares),rounding=cost-Math.round(amount),prepaid=paid.get(name)??0,balance=prepaid-cost;
+  const cost=roundedCost(shares),rounding=cost-Math.round(amount),prepaid=paid.get(name)??0,paidBySelf=isDirect()&&name===S.payer,balance=paidBySelf?0:prepaid-cost;
   if(rounding>0) details.push('올림 +'+won(rounding));
   const paymentText=prepaid?'\n낸 회비 '+won(prepaid)+' ('+paidDetails.get(name).join(' · ')+')':'';
-  renderBalance(name+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText);
-  refund ||= balance>0;more ||= balance<0;balances.push({name,balance});
+  renderBalance(name+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText,paidBySelf);
+  refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf});
  }
+ if(isDirect())return message+'\n'+directSettlementText(balances,account);
  const balance=balances[0]?.balance;
  message+='\n'+(balances.length&&balances.every(item=>item.balance===balance)
   ?balances.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.'))
@@ -961,6 +986,7 @@ function bindEvents(){
  $('resetMeeting').addEventListener('click',resetMeeting);
  ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S[id]=$(id).value;refresh();}}));
  $('acct').addEventListener('input',()=>{S.account=$('acct').value;refresh();});
+ $('payer').addEventListener('change',()=>setPayer($('payer').value));
  $('toggleNicknames').addEventListener('click',()=>{S.nicknamesOpen=!S.nicknamesOpen;renderNicknames();saveState();});
  $('addPrepay').addEventListener('click',addCollection);
  $('dOn').addEventListener('change',()=>{S.dOn=$('dOn').checked;refresh();});
