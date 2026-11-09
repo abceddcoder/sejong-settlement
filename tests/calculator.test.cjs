@@ -29,7 +29,7 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
   }
   const context = vm.createContext({
     document: { getElementById: id => elements[id] ||= Object.assign(element(), { id }), querySelectorAll: selector => selector === '#settlementMode button' ? modeButtons : [], createElement: element, createRange: () => ({ selectNodeContents() {} }) },
-    location: usage.location ?? { protocol: 'https:', hostname: 'localhost', pathname: '/' }, WebAssembly: {}, Worker, URL,
+    location: usage.location ?? { protocol: 'https:', hostname: 'localhost', pathname: '/' }, WebAssembly: {}, Worker, URL, URLSearchParams,
     navigator: { clipboard: usage.clipboard }, fetch: usage.fetch,
     getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
     window: { addEventListener() {} },
@@ -118,6 +118,36 @@ test('usage sends nothing in local previews or before a dashboard is configured'
     const { elements } = calculator(false, undefined, false, { host, location: new URL(url), fetch });
     assert.equal(elements.usageNotice.hidden, true);
   }
+  assert.deepEqual(requests, []);
+});
+
+test('test mode can generate and copy a settlement without counting or changing saved meetings', async () => {
+  const requests = [], copies = [];
+  const { api, elements, storage } = calculator(false, undefined, false, {
+    host: 'sample1.goatcounter.com',
+    location: new URL('https://sample1.github.io/sejong-settlement/?test=1'),
+    fetch: async url => { requests.push(url); },
+    clipboard: { writeText: async message => { copies.push(message); } },
+    setTimeout() {},
+  });
+  const saved = JSON.stringify({ ...api.freshState(), account: 'sample-private-account' });
+  storage.set('meetup-fee-calc.state.v1', saved);
+  storage.set('acct', 'sample-legacy-account');
+  api.loadState();
+  assert.equal(api.state().account, '');
+  api.enableRendering(); api.bindEvents();
+  Object.assign(api.state(), { ppl: '2', nicknames: ['sample1', 'sample2'] });
+  api.state().rounds[0].bill = '20000';
+  elements.calculate.events.click();
+  elements.cp.events.click();
+  await new Promise(setImmediate);
+  assert.equal(copies.length, 1);
+  assert.match(copies[0], /10,000원/);
+  api.resetMeeting(); api.confirmResetMeeting();
+  assert.equal(storage.get('meetup-fee-calc.state.v1'), saved);
+  assert.equal(storage.get('acct'), 'sample-legacy-account');
+  assert.equal(elements.testNotice.hidden, false);
+  assert.equal(elements.usageNotice.hidden, true);
   assert.deepEqual(requests, []);
 });
 

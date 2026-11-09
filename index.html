@@ -188,6 +188,7 @@ button:disabled{opacity:.55;cursor:default}
 <body>
 <main>
 <div class="page-heading"><h1>모임 금액정산 계산기</h1><button id="resetMeeting" type="button" class="quiet-button">초기화</button></div>
+<p id="testNotice" class="lb" hidden>테스트 모드 · 집계와 자동 저장을 사용하지 않아요.</p>
 <p id="saveStatus" class="lb" role="status"></p>
 <div class="seg" id="settlementMode" role="group" aria-label="정산 방식">
 <button type="button" data-mode="direct" class="on" aria-pressed="true">계산서로 바로 정산</button><button type="button" data-mode="prepay" aria-pressed="false">선입금 후 정산</button>
@@ -269,9 +270,10 @@ const $=id=>document.getElementById(id);
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const STORAGE_KEY='meetup-fee-calc.state.v1';
 const MAX_MONEY=9999999999;
+const testMode=new URLSearchParams(location.search).get('test')==='1';
 // Public dashboard hostname. Leave empty until the owner provides a site.
 const GOATCOUNTER_HOST='aabbccddeeff.goatcounter.com';
-const usageEnabled=/^[a-z0-9-]+\.goatcounter\.com$/.test(GOATCOUNTER_HOST)
+const usageEnabled=!testMode && /^[a-z0-9-]+\.goatcounter\.com$/.test(GOATCOUNTER_HOST)
  && location.protocol==='https:' && location.hostname.endsWith('.github.io')
  && /^\/sejong-settlement\/(?:index\.html)?$/.test(location.pathname);
 const usagePaths=new Map([
@@ -430,6 +432,7 @@ function normalizeState(raw){
  return state;
 }
 function loadState(){
+ if(testMode)return;
  try{
   const saved=localStorage.getItem(STORAGE_KEY);
   if(saved){S=normalizeState(JSON.parse(saved));$('saveStatus').textContent='';}
@@ -439,6 +442,7 @@ function loadState(){
  }
 }
 function saveState(){
+ if(testMode)return;
  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(S));$('saveStatus').textContent='';}
  catch{$('saveStatus').textContent='자동 저장이 안 되고 있어요. 화면을 닫으면 입력이 사라질 수 있어요.';}
 }
@@ -1115,7 +1119,9 @@ function confirmResetMeeting(){
  const dialog=$('resetConfirm');if(!dialog.open)return;
  dialog.close();
  captureRevision++;S=freshState();
- try{localStorage.removeItem('acct');localStorage.removeItem(STORAGE_KEY);}catch{}
+ if(!testMode){
+  try{localStorage.removeItem('acct');localStorage.removeItem(STORAGE_KEY);}catch{}
+ }
  document.querySelectorAll('.capture-status').forEach(status=>{status.textContent='';});
  refresh();$('ppl').focus();
 }
@@ -1179,6 +1185,7 @@ function bindEvents(){
  window.addEventListener('pagehide',saveState);
 }
 buildRounds();loadState();bindEvents();refresh(false);
+$('testNotice').hidden=!testMode;
 $('usageNotice').hidden=!usageEnabled;
 countUsage('visit');
 
