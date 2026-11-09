@@ -37,6 +37,27 @@ input[inputmode=numeric]{width:100%;min-width:0}
 .capture-button:disabled{cursor:default;opacity:.6}
 .capture-status{margin:0 0 12px}
 .capture-status:empty{display:none}
+.capture-help{color:var(--ac);cursor:pointer;font-size:13px}
+.capture-help-text{display:block;margin:-6px 0 8px;padding:0 2px;border:0;background:none}
+.picker-actions{display:flex;align-items:center;gap:6px}
+.capture-help-icon{width:44px;padding:0;font-size:19px}
+#captureHelp{width:calc(100% - 24px);max-width:460px;max-height:85vh;max-height:85dvh;margin:auto;padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);overflow-y:auto;overscroll-behavior:contain}
+#captureHelp::backdrop{background:#000b}
+.help-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px}
+.help-heading h2{margin:0}
+.help-heading button{width:44px;flex:none;cursor:pointer;font-size:22px;padding:0}
+.help-step{margin:0 0 16px;font-size:14px}
+.help-step p{margin:0 0 8px}
+.help-screen{background:#fff;color:#252525;border-radius:10px;padding:14px;font-size:13px}
+.help-screen-title{font-weight:600;margin-bottom:12px}
+.help-neighbors{display:flex;justify-content:space-between;align-items:center;border:2px solid #ff7a22;border-radius:8px;padding:10px;font-weight:600}
+.help-arrow{color:#e85d00;font-size:25px;line-height:1}
+.help-tabs{display:flex;justify-content:space-around;border-bottom:1px solid #ddd;padding-bottom:8px;font-weight:600}
+.help-person{display:flex;align-items:center;gap:10px;margin-top:12px}
+.help-avatar{width:32px;height:32px;flex:none;border-radius:50%;background:#e8e8e8}
+.help-person small{display:block;color:#777}
+.help-note{margin:0 0 12px}
+.help-done{width:100%;cursor:pointer;color:var(--ac);border-color:var(--ac)}
 .capture-review{margin:10px 0 16px;padding:12px;border:1px solid var(--ac);border-radius:10px;background:var(--soft)}
 .capture-review h3{margin:0 0 6px;font-size:15px}
 .capture-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
@@ -175,6 +196,7 @@ button:disabled{opacity:.55;cursor:default}
 <div class="collection-body">
 <div class="row attendee-row"><label for="ppl">참석 인원</label><input type="text" id="ppl" maxlength="3" inputmode="numeric" pattern="[0-9]*" value="4"><span class="unit">명</span><div class="attendee-actions"><button id="toggleNicknames" type="button" aria-label="참석자 닉네임 (필수)" aria-controls="nicknameOptions" aria-expanded="false">+</button><button id="captureUpload" class="capture-button" type="button" data-capture="nicknames">캡처 올리기</button></div></div>
 <p id="captureStatus" class="lb capture-status" role="status"></p>
+<button type="button" class="capture-help capture-help-text" data-capture-help aria-haspopup="dialog" aria-controls="captureHelp">캡처 방법 ⓘ</button>
 <div id="nicknameOptions" hidden>
 <div class="row"><label id="nicknamesLabel" for="nickname1">참석자 닉네임<br><span style="font-size:12px">(필수)</span></label><div id="nicknames" role="group" aria-labelledby="nicknamesLabel" aria-describedby="nicknameHint"></div></div>
 <p id="nicknameHint" class="lb"></p>
@@ -217,6 +239,16 @@ button:disabled{opacity:.55;cursor:default}
 </div>
 <footer class="group-credit"><a href="https://daangn.com/kr/share/community/ref/invite-group/baVmPBXpIwJ" target="_blank" rel="noopener noreferrer">당근 ‘세종 2030 오늘 뭐하지?’<br>모임에서 만들었어요.</a><p style="margin:4px 0 0">자유롭게 이용하셔도 좋아요.<br>모임 출처와 링크는 지우지 말고 꼭 남겨 주세요.</p></footer>
 </main>
+<dialog id="captureHelp" aria-labelledby="captureHelpTitle">
+<form method="dialog" class="help-heading"><h2 id="captureHelpTitle">당근 참석자 캡처 방법</h2><button aria-label="캡처 안내 닫기" autofocus>×</button></form>
+<div class="help-step"><p><b>① 당근 모임의 일정 글을 열어요.</b><br>‘참여 중인 이웃’ 오른쪽 <b>〉</b>를 눌러 주세요.</p>
+<div class="help-screen" role="img" aria-label="예시: 일정 글의 참여 중인 이웃 2/4 오른쪽 화살표를 누르는 화면"><div class="help-screen-title">‹ &nbsp; 모임 일정</div><div class="help-neighbors"><span>참여 중인 이웃 2/4</span><span class="help-arrow">〉</span></div></div></div>
+<div class="help-step"><p><b>② 닉네임이 쭉 나오는 목록 화면을 캡처해요.</b><br>참석자가 많으면 스크롤 캡처로 명단을 한 장에 담아 주세요.</p>
+<div class="help-screen" role="img" aria-label="예시: 참여 중 탭 아래에 닉네임 1과 닉네임 2가 세로로 나열된 참석자 목록"><div class="help-screen-title">‹ &nbsp; 참석자 목록</div><div class="help-tabs"><span>참여 중 2</span><span>대기 중 0</span></div><div class="help-person"><span class="help-avatar"></span><span>닉네임 1 / 출생연도 / 성별 / 동네<small>프로필 정보</small></span></div><div class="help-person"><span class="help-avatar"></span><span>닉네임 2 / 출생연도 / 성별 / 동네<small>프로필 정보</small></span></div></div></div>
+<div class="help-step"><p><b>③ 계산기로 돌아와 ‘캡처 올리기’ 또는 ‘+ 캡처’를 눌러요.</b><br>저장한 사진 <b>한 장</b>을 선택하면 닉네임을 읽어 와요.</p></div>
+<p class="lb help-note">읽어 온 이름과 실제 참석자를 확인해 주세요.<br>위 그림은 사용 방법을 보여주는 예시예요.</p>
+<form method="dialog"><button class="help-done">알겠어요</button></form>
+</dialog>
 <script>
 const $=id=>document.getElementById(id);
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
@@ -360,7 +392,7 @@ function paymentDraft(number,report=false){
 }
 function pickerHtml(kind,number){
  const id=(kind==='collection'?'prepayNames':'names')+number;
- return '<div class="picker-title"><span>참석자 선택</span><button type="button" class="capture-button" data-capture="'+id+'">+ 캡처</button></div>'
+ return '<div class="picker-title"><span>참석자 선택</span><span class="picker-actions"><button type="button" class="capture-button" data-capture="'+id+'">+ 캡처</button><button type="button" class="capture-help capture-help-icon" data-capture-help aria-label="캡처 방법" title="캡처 방법" aria-haspopup="dialog" aria-controls="captureHelp">ⓘ</button></span></div>'
   +'<p class="lb picker-hint">참석하는 사람을 선택하고, 새로 온 사람만 추가해 주세요.</p>'
   +'<div id="'+id+'" class="person-options" role="group" aria-label="'+number+'차 '+(kind==='collection'?'회비 낼 사람':'참석자')+'"></div>'
   +'<div class="add-person"><input type="text" id="'+id+'New" maxlength="1000" placeholder="새로 온 사람 닉네임" aria-label="'+number+'차 '+(kind==='collection'?'회비':'정산')+' 명단에 추가할 닉네임" autocomplete="off"><button type="button" id="'+id+'Add">추가</button></div>'
@@ -404,7 +436,7 @@ function renderNicknames(){
  $('nicknameOptions').hidden=!S.nicknamesOpen;
  $('toggleNicknames').textContent=S.nicknamesOpen?'−':'+';
  $('toggleNicknames').setAttribute('aria-expanded',String(S.nicknamesOpen));
- $('nicknameHint').textContent='참석자 '+count+'명의 닉네임을 모두 적어 주세요.\n참석자 목록을 캡처한 뒤 ‘캡처 올리기’를 누르면 한 번에 채울 수 있어요.';
+ $('nicknameHint').textContent='참석자 '+count+'명의 닉네임을 모두 적어 주세요.';
 }
 function renderChoices(id,options,selected,disabled,onChange){
  const container=$(id),key=JSON.stringify(options);
@@ -926,6 +958,7 @@ function resetMeeting(){
  refresh();$('ppl').focus();
 }
 function bindEvents(){
+ document.querySelectorAll('[data-capture-help]').forEach(button=>button.addEventListener('click',()=>$('captureHelp').showModal()));
  $('applyCapture').addEventListener('click',confirmCaptureReview);
  $('cancelCapture').addEventListener('click',()=>{const id=captureReview?.id;clearCaptureReview();if(id) $(id==='nicknames'?'captureStatus':id+'CaptureStatus').textContent='기존 명단을 유지했어요.';});
  document.querySelectorAll('#settlementMode button').forEach(button=>button.addEventListener('click',()=>setMode(button.dataset.mode)));
