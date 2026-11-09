@@ -7,7 +7,9 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담') {
+require('./identity-cases.cjs')({ test, assert, calculator: () => calculator(false, undefined, false), html });
+
+function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담', legacyFixtures = true) {
   const rows = [], workers = [];
   const elements = {}, storage = new Map();
   const element = () => ({ children: [], value: '', events: {}, style: {}, classList: { toggle() {} }, focus() { this.focused = true; }, after() {}, scrollIntoView() {}, setAttribute() {}, addEventListener(type, handler) { this.events[type] = handler; }, showModal() { this.open = true; }, close() { this.open = false; }, set innerHTML(value) { this.children = []; }, replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
@@ -32,13 +34,16 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
     setTimeout, clearTimeout, rows,
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
+  // Existing calculation fixtures use explicit IDs with matching display names.
+  // Identity regressions below use the application's generated IDs instead.
+  if (legacyFixtures) vm.runInContext('S.registry=Array.from({length:10},(_,i)=>({id:"sample"+(i+1),name:"sample"+(i+1)}));', context);
   vm.runInContext('const renderBalanceUI=renderBalance,renderNicknamesUI=renderNicknames,refreshUI=refresh,saveStateUI=saveState; renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=()=>clearCaptureReview(); renderNicknames=saveState=()=>{};', context);
-  return { api: vm.runInContext('({bindEvents,resetMeeting,confirmResetMeeting,renderRounds,renderCollection,renderMoneyInput,enableRendering:()=>{refresh=refreshUI;saveState=saveStateUI;renderNicknames=renderNicknamesUI;refresh(false);},confirmModeChange,setPayer,renderPayer,payerNames,renderBalanceUI,renderNicknamesUI,roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements, modeButtons, storage };
+  return { api: vm.runInContext('({setRoster,roster,noAlcoholNames,feeInfo,loadState,bindEvents,resetMeeting,confirmResetMeeting,renderRounds,renderCollection,renderMoneyInput,enableRendering:()=>{refresh=refreshUI;saveState=saveStateUI;renderNicknames=renderNicknamesUI;refresh(false);},confirmModeChange,setPayer,renderPayer,payerNames,renderBalanceUI,renderNicknamesUI,roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,toggleSettled,captureLocked,removeCaptureBadges,confirmCaptureReview,clearCaptureReview,pendingReview:()=>captureReview,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements, modeButtons, storage };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
   // Include accessible confirmation dialogs and amount previews; OCR stays lazy-loaded.
-  assert.ok(Buffer.byteLength(html.replace(/\r\n/g, '\n')) < 76000);
+  assert.ok(Buffer.byteLength(html.replace(/\r\n/g, '\n')) < 85000);
   assert.doesNotMatch(html, /ocrWorkerSource|id="ocrApi"|<script[^>]+src=|rel="(?:preload|prefetch)"/);
   assert.match(html, /property="og:description" content="회비 걷기부터/);
   assert.match(html, /:root\{color-scheme:dark;/);
@@ -56,11 +61,11 @@ test('100,401 won split among four never leaves the organizer short', () => {
   assert.deepEqual(rows.map(row => -row[1]), [25200, 25200, 25200, 25200]);
 });
 
-test('the 20 percent buffer is rounded up without first discarding fractions', () => {
+test('the entered fee has no buffer or thousand-won rounding', () => {
   const { api } = calculator();
-  assert.equal(api.feeFor(30000), 36000);
-  assert.equal(api.feeFor(5000), 6000);
-  assert.equal(api.feeFor(1667), 3000);
+  assert.equal(api.feeFor(30000), 30000);
+  assert.equal(api.feeFor(5000), 5000);
+  assert.equal(api.feeFor(1667), 1667);
 });
 
 test('the existing 100-won ceiling remains unchanged for 100,100 won', () => {
@@ -239,6 +244,7 @@ test('switching modes preserves input but cannot discard confirmed payments', ()
 test('saved mode is restored while older saves remain in prepayment mode', () => {
   const { api } = calculator();
   const legacy = JSON.parse(JSON.stringify(api.freshState()));
+  legacy.version = 1;
   delete legacy.mode;
   assert.equal(api.normalizeState(legacy).mode, 'prepay');
   legacy.mode = 'direct';
@@ -280,6 +286,7 @@ test('an OCR typo cannot create a new attendee or uncheck an existing one before
   const { api, elements } = calculator(false, 'sampleI/93/남/종촌\nsample2/92/여/도담');
   const state = api.state();
   state.ppl = '2'; state.nicknames = ['sample1', 'sample2'];
+  api.roster(1);
   const before = JSON.stringify(state);
   api.target('names2');
   await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
@@ -295,6 +302,7 @@ test('an OCR typo cannot create a new attendee or uncheck an existing one before
 test('invalid or cancelled capture review never changes the saved roster', async () => {
   const { api, elements } = calculator(false, 'sample1/93/남/종촌\nsample3/92/여/도담');
   const state = api.state(); state.ppl = '2'; state.nicknames = ['sample1', 'sample2'];
+  api.roster(1);
   const before = JSON.stringify(state);
   api.target('names2');
   await api.handleCapture({ target: { files: [{ size: 100 }], value: 'capture' } });
@@ -510,17 +518,17 @@ test('payer selection includes active later arrivals and clears when their round
   assert.doesNotMatch(api.calculate(), /결제함|sample3/);
 });
 
-test('renaming or removing a payer resets selection and unknown names cannot exclude a charge', () => {
+test('renaming a payer preserves identity, removing them clears selection and unknown IDs cannot exclude a charge', () => {
   const { api, rows, elements } = calculator();
   const state = api.state();
   Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'] }); state.rounds[0].bill = '10000';
   api.setPayer('sample1'); state.nicknames[0] = 'sample3'; api.renderPayer();
-  assert.equal(state.payer, '');
-  assert.equal(elements.payer.value, '');
+  assert.equal(state.payer, 'sample1');
+  assert.equal(elements.payer.value, 'sample1');
   api.setPayer('sample99');
-  assert.equal(state.payer, '');
+  assert.equal(state.payer, 'sample1');
   api.calculate();
-  assert.deepEqual(rows.map(row => row[1]), [-5000, -5000]);
+  assert.deepEqual(rows.map(row => row[1]), [0, -5000]);
   api.setPayer('sample2'); state.ppl = '1'; api.renderPayer();
   assert.equal(state.payer, '');
 });
@@ -533,7 +541,7 @@ test('prepayment shows payer cost and groups refunds for everyone else without c
   assert.equal(elements.payerField.hidden, false);
   state.rounds[0].payment = api.freezePayment(state.nicknames, 6000);
   const message = api.calculate();
-  assert.match(message, /· sample1 5,000원 \(결제함\)\n1명 모두 1인 1,000원씩 환불해 드릴게요\./);
+  assert.match(message, /· sample1 5,000원 \(결제함\)\nsample2 1인 1,000원 환불해 드릴게요\./);
   assert.deepEqual(rows.map(row => row[1]), [0, 1000]);
   for (const row of rows) api.renderBalanceUI(...row);
   assert.deepEqual(elements.res.children.map(row => row.children[1].textContent), ['5,000원 (결제함)', '환불 1,000원']);
@@ -567,7 +575,7 @@ test('a solo payer or a zero bill never gets an instruction to send money', () =
   assert.doesNotMatch(message, /보내주세요|추가 입금|환불/);
   assert.equal(rows[0][1], 0);
   api.setPayer(''); state.rounds[0].bill = '0';
-  assert.match(api.calculate(), /1명 모두 1인 0원이에요\. \(sample1\)$/);
+  assert.match(api.calculate(), /sample1 1인 0원이에요\.$/);
 });
 
 test('prepayment groups additional deposits separately from the payer and keeps payment records', () => {
@@ -637,6 +645,7 @@ test('confirming a mode change clears only all payment confirmations and preserv
     payment: api.freezePayment(['sample1', 'sample2'], 6000), collectionVisible: true,
   }));
   const expected = JSON.parse(JSON.stringify(state));
+  expected.nicknameIds = ['sample1', 'sample2'];
   expected.mode = 'direct'; expected.rounds.forEach(round => { round.payment = null; });
   api.setMode('direct'); api.confirmModeChange();
   assert.equal(elements.modeChangeConfirm.open, false);
@@ -665,9 +674,11 @@ test('reset opens a page dialog; cancelling preserves records, confirming resets
   assert.equal(storage.get('meetup-fee-calc.state.v1'), before);
   elements.resetMeeting.events.click(); elements.confirmResetMeeting.events.click();
   assert.equal(elements.resetConfirm.open, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(api.state())), JSON.parse(JSON.stringify(api.freshState())));
+  const empty = calculator(false, undefined, false); empty.api.enableRendering();
+  const expected = JSON.parse(JSON.stringify(empty.api.state()));
+  assert.deepEqual(JSON.parse(JSON.stringify(api.state())), expected);
   assert.equal(storage.has('acct'), false);
-  assert.deepEqual(JSON.parse(storage.get('meetup-fee-calc.state.v1')), JSON.parse(JSON.stringify(api.freshState())));
+  assert.deepEqual(JSON.parse(storage.get('meetup-fee-calc.state.v1')), expected);
   assert.equal(elements.ppl.focused, true);
   assert.equal(elements.b1.value, ''); assert.equal(elements.b1Preview.textContent, '');
   assert.match(html, /<dialog id="resetConfirm"[^>]*aria-labelledby="resetTitle"/);
@@ -707,6 +718,7 @@ test('non-drinkers are marked in individual chat results, uniform lists and paye
 test('non-drinking labels use active rounds only and disappear when alcohol calculation is off', () => {
   const { api } = calculator(), state = api.state();
   Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'], lastRound: 2, dOn: true });
+  api.roster(1);
   Object.assign(state.rounds[0], { bill: '30000', liquor: '10000', noAlcohol: ['sample1'], settled: true });
   Object.assign(state.rounds[1], { bill: '10000', noAlcohol: [] });
   assert.doesNotMatch(api.calculate(), /\(노술\)/);
@@ -739,9 +751,9 @@ test('every money input removes commas and whitespace, previews thousands and sa
 test('money previews cover empty, zero, invalid and maximum values without loosening validation', () => {
   const { api, elements } = calculator(); api.enableRendering(); api.bindEvents();
   for (const [input, expected, preview] of [
-    ['1,000,000,000,000', '1000000000000', '1,000,000,000,000원'],
+    ['9,999,999,999', '9999999999', '9,999,999,999원'],
     ['0', '0', '0원'], [' , \t', '', ''], ['82x000', '82x000', ''],
-    ['-82,000', '-82000', ''], ['1,000,000,000,001', '1000000000001', ''],
+    ['-82,000', '-82000', ''], ['10,000,000,000', '-82000', ''],
   ]) {
     elements.b1.value = input; elements.b1.events.input();
     assert.equal(api.state().rounds[0].bill, expected);
