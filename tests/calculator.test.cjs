@@ -94,10 +94,12 @@ test('usage counts successful settlement actions and sends only fixed event para
 
   assert.deepEqual(requests.map(({ url }) => url.searchParams.get('p')),
     ['/sejong-settlement/', 'settlement-created', 'settlement-copied', 'settlement-copied']);
+  assert.deepEqual(requests.map(({ url }) => url.searchParams.get('t')),
+    ['계산기 방문', '문구 생성', '문구 복사', '문구 복사']);
   for (const [i, { url, options }] of requests.entries()) {
     assert.equal(url.origin, 'https://sample1.goatcounter.com');
     assert.equal(url.pathname, '/count');
-    assert.deepEqual([...url.searchParams.keys()].sort(), i ? ['e', 'ns', 'p', 'rnd'] : ['p', 'rnd']);
+    assert.deepEqual([...url.searchParams.keys()].sort(), i ? ['e', 'ns', 'p', 'rnd', 't'] : ['p', 'rnd', 't']);
     assert.equal(url.searchParams.get('e'), i ? '1' : null);
     assert.equal(url.searchParams.get('ns'), i ? '1' : null);
     assert.equal(options.credentials, 'omit');

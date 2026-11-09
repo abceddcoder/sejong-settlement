@@ -276,18 +276,19 @@ const GOATCOUNTER_HOST='aabbccddeeff.goatcounter.com';
 const usageEnabled=!testMode && /^[a-z0-9-]+\.goatcounter\.com$/.test(GOATCOUNTER_HOST)
  && location.protocol==='https:' && location.hostname.endsWith('.github.io')
  && /^\/sejong-settlement\/(?:index\.html)?$/.test(location.pathname);
-const usagePaths=new Map([
- ['visit','/sejong-settlement/'],
- ['created','settlement-created'],
- ['copied','settlement-copied']
+const usageMetrics=new Map([
+ ['visit',{path:'/sejong-settlement/',title:'계산기 방문'}],
+ ['created',{path:'settlement-created',title:'문구 생성'}],
+ ['copied',{path:'settlement-copied',title:'문구 복사'}]
 ]);
 
 function countUsage(kind){
  if(!usageEnabled||typeof fetch!=='function')return;
- const path=usagePaths.get(kind);
- if(!path)return;
+ const metric=usageMetrics.get(kind);
+ if(!metric)return;
  const url=new URL('https://'+GOATCOUNTER_HOST+'/count');
- url.searchParams.set('p',path);
+ url.searchParams.set('p',metric.path);
+ url.searchParams.set('t',metric.title);
  if(kind!=='visit'){
   url.searchParams.set('e','1');
   url.searchParams.set('ns','1'); // Count each completed action, including repeat actions.
