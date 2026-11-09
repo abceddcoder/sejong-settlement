@@ -154,13 +154,13 @@ button:disabled{opacity:.55;cursor:default}
 <div class="page-heading"><h1>모임 금액정산 계산기</h1><button id="resetMeeting" type="button" class="quiet-button">초기화</button></div>
 <p id="saveStatus" class="lb" role="status"></p>
 <div class="seg" id="settlementMode" role="group" aria-label="정산 방식">
-<button type="button" data-mode="prepay" class="on" aria-pressed="true">선입금 후 정산</button><button type="button" data-mode="direct" aria-pressed="false">계산서로 바로 정산</button>
+<button type="button" data-mode="direct" class="on" aria-pressed="true">계산서로 바로 정산</button><button type="button" data-mode="prepay" aria-pressed="false">선입금 후 정산</button>
 </div>
-<p id="modeHint" class="lb">회비를 먼저 걷고, 계산서 기준으로 차액을 정산해요.</p>
-<section id="collection">
-<h2 id="collectionTitle">1. 주문할 때: 회비 걷기</h2>
+<p id="modeHint" class="lb">선입금 없이 참석자와 계산서 금액으로 각자 낼 돈을 계산해요.</p>
+<section id="collection" class="direct">
+<h2 id="collectionTitle">1. 1차 참석자 입력</h2>
 <details id="collectionRound1" class="collection-round" open>
-<summary id="firstCollectionSummary"><span id="collectionSummary1">1차 · 회비 걷기</span><span class="summary-action">보기 / 수정</span></summary>
+<summary id="firstCollectionSummary" hidden><span id="collectionSummary1">1차 · 회비 걷기</span><span class="summary-action">보기 / 수정</span></summary>
 <div class="collection-body">
 <div class="row attendee-row"><label for="ppl">참석 인원</label><input type="text" id="ppl" maxlength="3" inputmode="numeric" pattern="[0-9]*" value="4"><span class="unit">명</span><div class="attendee-actions"><button id="toggleNicknames" type="button" aria-label="참석자 닉네임 (필수)" aria-controls="nicknameOptions" aria-expanded="false">+</button><button id="captureUpload" class="capture-button" type="button" data-capture="nicknames">캡처 올리기</button></div></div>
 <p id="captureStatus" class="lb capture-status" role="status"></p>
@@ -168,26 +168,26 @@ button:disabled{opacity:.55;cursor:default}
 <div class="row"><label id="nicknamesLabel" for="nickname1">참석자 닉네임<br><span style="font-size:12px">(필수)</span></label><div id="nicknames" role="group" aria-labelledby="nicknamesLabel" aria-describedby="nicknameHint"></div></div>
 <p id="nicknameHint" class="lb"></p>
 </div>
-<div class="row" id="estimateRow"><label for="base">1인 예상 비용</label><input type="text" id="base" maxlength="16" inputmode="numeric" pattern="[0-9]*" value="30000"><span class="unit">원</span></div>
+<div class="row" id="estimateRow" hidden><label for="base">1인 예상 비용</label><input type="text" id="base" maxlength="16" inputmode="numeric" pattern="[0-9]*" value="30000"><span class="unit">원</span></div>
 <div class="row"><label for="acct">입금 계좌<br><span style="font-size:12px">(선택)</span></label><input type="text" id="acct" maxlength="300" placeholder="은행 · 계좌번호 · 예금주" autocomplete="off"></div>
-<div id="feeEstimate">
+<div id="feeEstimate" hidden>
 <div class="row"><label>여유분</label><span style="font-weight:600">20% 포함</span></div>
 <div class="grid"><div class="mc"><p class="lb">1인 회비</p><p class="nm" id="fee">-</p></div><div class="mc"><p class="lb">총 모이는 금액</p><p class="nm" id="tot">-</p></div></div>
 </div>
 <p class="warn" id="feeWarn" hidden role="alert"></p>
-<div id="firstPaymentControls">
+<div id="firstPaymentControls" hidden>
 <button id="collect" type="button">회비 안내 문구 만들기</button>
 <label class="tg payment-confirm"><input type="checkbox" id="prepayConfirmed1"> 전원 입금 확인</label>
 <p id="paymentHint1" class="lb payment-hint">실제로 모두 입금했을 때 체크해 주세요.</p>
 </div>
 </div>
 </details>
-<div id="prepayFields"></div>
-<button id="addPrepay" type="button">+ 다음 차수 회비 걷기</button>
+<div id="prepayFields" hidden></div>
+<button id="addPrepay" type="button" hidden>+ 다음 차수 회비 걷기</button>
 <input id="captureFile" type="file" accept="image/*" hidden>
 </section>
 <section id="settlement">
-<h2 id="settlementTitle">2. 모임 후: 계산서로 정산</h2>
+<h2 id="settlementTitle">2. 계산서로 정산</h2>
 <p class="lb" style="margin:0 0 6px">몇 차까지 정산할까요?</p>
 <div class="seg" id="seg" aria-label="마지막 정산 차수">
 <button type="button" data-r="1" class="on" aria-pressed="true">1차</button><button type="button" data-r="2" aria-pressed="false">2차</button><button type="button" data-r="3" aria-pressed="false">3차</button><button type="button" data-r="4" aria-pressed="false">4차</button>
@@ -210,7 +210,7 @@ let captureTarget='nicknames',captureBusy=false,captureRevision=0;
 function freshRound(index){
  return {bill:'',liquor:'',attendees:null,noAlcohol:null,collectionNames:null,collectionAmount:'',payment:null,collectionVisible:index===0,collectionOpen:index===0,rosterOpen:false,newAttendee:'',newCollectionName:''};
 }
-function freshState(){return {version:1,mode:'prepay',ppl:'4',base:'30000',account:'',nicknames:['','','',''],nicknamesOpen:false,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
+function freshState(){return {version:1,mode:'direct',ppl:'4',base:'30000',account:'',nicknames:['','','',''],nicknamesOpen:true,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
 let S=freshState();
 const isDirect=()=>S.mode==='direct';
 function setMode(mode){
@@ -813,7 +813,7 @@ async function handleCapture(event){
 }
 function resetMeeting(){
  if(!confirm('현재 모임의 명단, 금액, 입금 확인과 계좌를 모두 초기화할까요?')) return;
- const mode=S.mode;captureRevision++;S=freshState();S.mode=mode;if(isDirect()) S.nicknamesOpen=true;
+ captureRevision++;S=freshState();
  try{localStorage.removeItem('acct');localStorage.removeItem(STORAGE_KEY);}catch{}
  document.querySelectorAll('.capture-status').forEach(status=>{status.textContent='';});
  refresh();$('ppl').focus();

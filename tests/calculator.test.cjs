@@ -38,6 +38,10 @@ test('the first page has no eager OCR assets and contains static share text', ()
   assert.match(html, /property="og:description" content="회비 걷기부터/);
   assert.match(html, /:root\{color-scheme:dark;/);
   assert.doesNotMatch(html, /prefers-color-scheme/);
+  assert.match(html, /data-mode="direct" class="on" aria-pressed="true"/);
+  assert.ok(html.indexOf('data-mode="direct"') < html.indexOf('data-mode="prepay"'));
+  assert.equal(calculator().api.freshState().mode, 'direct');
+  assert.equal(calculator().api.freshState().nicknamesOpen, true);
   assert.equal(calculator().workers.length, 0);
 });
 
@@ -181,6 +185,7 @@ test('direct settlement still handles alcohol exclusions and later arrivals', ()
 
 test('prepayment mode still requires confirmation and subtracts collected money', () => {
   const { api, rows } = calculator();
+  api.setMode('prepay');
   const state = api.state();
   state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
   state.rounds[0].bill = '100000';
