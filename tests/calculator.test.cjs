@@ -34,7 +34,7 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
-  assert.ok(Buffer.byteLength(html) < 65000);
+  assert.ok(Buffer.byteLength(html.replace(/\r\n/g, '\n')) < 65000);
   assert.doesNotMatch(html, /ocrWorkerSource|id="ocrApi"|<script[^>]+src=|rel="(?:preload|prefetch)"/);
   assert.match(html, /property="og:description" content="회비 걷기부터/);
   assert.match(html, /:root\{color-scheme:dark;/);

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1c1c1b">
+<meta name="robots" content="noindex">
+<title>영수증 촬영 테스트 · 모임 금액정산 계산기</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;background:#1c1c1b;color:#f1efe8;line-height:1.65}
+*{box-sizing:border-box}body{margin:0}main{max-width:520px;margin:auto;padding:22px 16px 40px}h1{font-size:22px;margin:16px 0 8px}h2{font-size:17px;margin:0 0 10px}p{margin:8px 0 16px}a{color:#85b7eb}section{background:#262624;border:1px solid #444441;border-radius:14px;padding:16px;margin:16px 0}button,input{font:inherit;color:inherit;background:#2f2f2d;border:1px solid #555550;border-radius:8px;padding:10px 12px;min-height:46px;min-width:0}button{cursor:pointer;touch-action:manipulation}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid #85b7eb;outline-offset:2px}.actions{display:grid;gap:10px}.primary{background:#0c447c;border-color:#85b7eb;color:#d2e8ff}.hint{color:#b4b2a9;font-size:13px}.preview{display:block;max-width:100%;max-height:260px;margin:12px auto;object-fit:contain}#receiptStatus{overflow-wrap:anywhere}#receiptStatus:empty{display:none}#receiptCandidates{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}#receiptCandidates button{font-size:14px}.amount-row{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.amount-row input{width:100%;font-size:20px}#confirmReceipt{width:100%}#receiptFeedback{color:#97c459;white-space:pre-line}summary{cursor:pointer;min-height:44px;padding:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:300px;overflow:auto}footer{font-size:12px;color:#b4b2a9;text-align:center;margin-top:24px}[hidden]{display:none!important}
+</style>
+<script src="./assets/receipt-test.js" defer></script>
+</head>
+<body><main>
+<a href="./">← 계산기로 돌아가기</a>
+<h1>영수증 촬영 테스트</h1>
+<p class="hint">사진에서 총액을 읽어 보는 테스트예요. 기존 모임의 정산 금액은 바뀌지 않아요.</p>
+<section>
+<h2>1. 영수증을 찍거나 선택해 주세요</h2>
+<p class="hint">글자가 선명하고 합계까지 보이도록 정면에서 찍어 주세요. 카메라가 안 열리면 휴대폰 카메라로 찍은 뒤 사진을 선택해 주세요.</p>
+<div class="actions"><button id="takeReceipt" class="primary" type="button">카메라로 찍기</button><button id="chooseReceipt" type="button">저장된 사진 선택</button></div>
+<input id="receiptCamera" type="file" accept="image/*" capture="environment" hidden>
+<input id="receiptFile" type="file" accept="image/*" hidden>
+<p id="receiptStatus" role="status" aria-live="polite"></p>
+<button id="cancelReceipt" type="button" hidden>인식 취소</button>
+<img id="receiptPreview" class="preview" alt="선택한 영수증" hidden>
+</section>
+<section id="receiptResult" hidden>
+<h2>2. 영수증의 총액과 같은지 확인해 주세요</h2>
+<p id="receiptResultHint" class="hint"></p>
+<div id="receiptCandidates" role="group" aria-label="사진에서 찾은 금액"></div>
+<label for="receiptAmount">확인할 총액</label>
+<div class="amount-row"><input id="receiptAmount" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="13" autocomplete="off"><span>원</span></div>
+<button id="confirmReceipt" type="button" class="primary">이 금액 확인</button>
+<p id="receiptFeedback" role="status"></p>
+<details><summary>인식한 글자 보기</summary><pre id="receiptText"></pre></details>
+</section>
+<p class="hint">사진과 인식 내용은 이 기기에서만 처리하며 저장·전송하지 않아요. 처음 인식할 때만 인식 기능을 내려받아 잠시 걸릴 수 있어요.</p>
+<footer><a href="https://daangn.com/kr/share/community/ref/invite-group/baVmPBXpIwJ" target="_blank" rel="noopener noreferrer">당근 ‘세종 2030 오늘 뭐하지?’ 모임에서 만들었어요.</a><p>자유롭게 이용하셔도 좋아요.<br>모임 출처와 링크는 지우지 말고 꼭 남겨 주세요.</p></footer>
+</main></body></html>
