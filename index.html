@@ -242,6 +242,7 @@ button:disabled{opacity:.55;cursor:default}
 <div class="capture-review-actions"><button id="applyCapture" type="button">명단 적용</button><button id="cancelCapture" type="button">취소</button></div>
 </div>
 <footer class="group-credit"><a href="https://daangn.com/kr/share/community/ref/invite-group/baVmPBXpIwJ" target="_blank" rel="noopener noreferrer">당근 ‘세종 2030 오늘 뭐하지?’<br>모임에서 만들었어요.</a><p style="margin:4px 0 0">자유롭게 이용하셔도 좋아요.<br>모임 출처와 링크는 지우지 말고 꼭 남겨 주세요.</p></footer>
+<p id="usageNotice" class="group-credit" hidden>GoatCounter로 방문과 정산 문구 생성·복사 횟수를 집계해요. 입력한 내용은 전송하지 않아요.</p>
 </main>
 <dialog id="captureHelp" aria-labelledby="captureHelpTitle">
 <form method="dialog" class="help-heading"><h2 id="captureHelpTitle">당근 참석자 캡처 방법</h2><button aria-label="캡처 안내 닫기" autofocus>×</button></form>
@@ -268,6 +269,31 @@ const $=id=>document.getElementById(id);
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const STORAGE_KEY='meetup-fee-calc.state.v1';
 const MAX_MONEY=9999999999;
+// Public dashboard hostname. Leave empty until the owner provides a site.
+const GOATCOUNTER_HOST='aabbccddeeff.goatcounter.com';
+const usageEnabled=/^[a-z0-9-]+\.goatcounter\.com$/.test(GOATCOUNTER_HOST)
+ && location.protocol==='https:' && location.hostname.endsWith('.github.io')
+ && /^\/sejong-settlement\/(?:index\.html)?$/.test(location.pathname);
+const usagePaths=new Map([
+ ['visit','/sejong-settlement/'],
+ ['created','settlement-created'],
+ ['copied','settlement-copied']
+]);
+
+function countUsage(kind){
+ if(!usageEnabled||typeof fetch!=='function')return;
+ const path=usagePaths.get(kind);
+ if(!path)return;
+ const url=new URL('https://'+GOATCOUNTER_HOST+'/count');
+ url.searchParams.set('p',path);
+ if(kind!=='visit'){
+  url.searchParams.set('e','1');
+  url.searchParams.set('ns','1'); // Count each completed action, including repeat actions.
+ }
+ url.searchParams.set('rnd',Math.random().toString(36).slice(2));
+ // The count endpoint accepts a browser GET. Do not send the current URL, cookies or form values.
+ void fetch(url,{mode:'no-cors',credentials:'omit',referrerPolicy:'no-referrer',keepalive:true}).catch(()=>{});
+}
 let captureTarget='nicknames',captureBusy=false,captureRevision=0,captureReview=null;
 function freshRound(index){
  return {bill:'',liquor:'',settled:false,snapshot:null,attendees:null,noAlcohol:null,collectionNames:null,collectionAmount:'',payment:null,collectionVisible:index===0,collectionOpen:index===0,rosterOpen:false,newAttendee:'',newCollectionName:''};
@@ -973,7 +999,14 @@ function settleByPerson(rounds,payments,account){
  if(more) message+=(refund?'\n':'\n\n')+'입금할 금액은 '+(account?account+ro(account)+' ':'')+'지금 보내주세요.';
  return message;
 }
-function showMessage(section,message){$(section).after($('message'));$('msg').textContent=message;$('cp').textContent='문구 복사';$('message').hidden=false;$('message').scrollIntoView({block:'start'});}
+function showMessage(section,message){
+ $(section).after($('message'));
+ $('msg').textContent=message;
+ $('cp').textContent='문구 복사';
+ $('message').hidden=false;
+ $('message').scrollIntoView({block:'start'});
+ if(section==='settlement')countUsage('created');
+}
 function togglePayment(number,checked){
  if(isDirect()||S.rounds[number-1].settled) return;
  const r=S.rounds[number-1];
@@ -1134,13 +1167,20 @@ function bindEvents(){
  });
  $('calculate').addEventListener('click',()=>{syncFirstPeople(true);refresh(false);const message=calculate(true);if(message!==undefined) showMessage('settlement',message);saveState();});
  $('cp').addEventListener('click',()=>{
-  const ok=()=>{$('cp').textContent='복사됨';setTimeout(()=>{$('cp').textContent='문구 복사';},1500);};
+  const isSettlement=$('message').previousElementSibling?.id==='settlement';
+  const ok=()=>{
+   $('cp').textContent='복사됨';
+   if(isSettlement)countUsage('copied');
+   setTimeout(()=>{$('cp').textContent='문구 복사';},1500);
+  };
   const fail=()=>{const range=document.createRange();range.selectNodeContents($('msg'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);$('cp').textContent='글자를 길게 눌러 복사하세요';};
   try{navigator.clipboard.writeText($('msg').textContent).then(ok).catch(fail);}catch{fail();}
  });
  window.addEventListener('pagehide',saveState);
 }
 buildRounds();loadState();bindEvents();refresh(false);
+$('usageNotice').hidden=!usageEnabled;
+countUsage('visit');
 
 </script>
 </body>

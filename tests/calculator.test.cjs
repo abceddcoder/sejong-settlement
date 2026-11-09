@@ -10,10 +10,10 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 require('./identity-cases.cjs')({ test, assert, calculator: () => calculator(false, undefined, false), html });
 require('./final-polish.cjs')({ test, assert, calculator: () => calculator(false, undefined, false), html });
 
-function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담', legacyFixtures = true) {
+function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담', legacyFixtures = true, usage = {}) {
   const rows = [], workers = [];
   const elements = {}, storage = new Map();
-  const element = () => ({ children: [], value: '', events: {}, style: {}, classList: { toggle() {} }, focus() { this.focused = true; }, after() {}, scrollIntoView() {}, setAttribute() {}, addEventListener(type, handler) { this.events[type] = handler; }, showModal() { this.open = true; }, close() { this.open = false; }, set innerHTML(value) { this.children = []; }, replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
+  const element = () => ({ children: [], value: '', events: {}, style: {}, classList: { toggle() {} }, focus() { this.focused = true; }, after(sibling) { sibling.previousElementSibling = this; }, scrollIntoView() {}, setAttribute() {}, addEventListener(type, handler) { this.events[type] = handler; }, showModal() { this.open = true; }, close() { this.open = false; }, set innerHTML(value) { this.children = []; }, replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); } });
   const modeButtons = ['direct', 'prepay'].map(mode => ({ ...element(), dataset: { mode } }));
   class Worker {
     constructor(url) { this.url = url; workers.push(this); }
@@ -28,13 +28,16 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
     terminate() { this.terminated = true; }
   }
   const context = vm.createContext({
-    document: { getElementById: id => elements[id] ||= element(), querySelectorAll: selector => selector === '#settlementMode button' ? modeButtons : [], createElement: element },
-    location: { protocol: 'https:' }, WebAssembly: {}, Worker,
+    document: { getElementById: id => elements[id] ||= Object.assign(element(), { id }), querySelectorAll: selector => selector === '#settlementMode button' ? modeButtons : [], createElement: element, createRange: () => ({ selectNodeContents() {} }) },
+    location: usage.location ?? { protocol: 'https:', hostname: 'localhost', pathname: '/' }, WebAssembly: {}, Worker, URL,
+    navigator: { clipboard: usage.clipboard }, fetch: usage.fetch,
+    getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
     window: { addEventListener() {} },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    setTimeout, clearTimeout, rows,
+    setTimeout: usage.setTimeout ?? setTimeout, clearTimeout, rows,
   });
-  vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
+  const source = usage.host === undefined ? script : script.replace(/const GOATCOUNTER_HOST='[^']*';/, `const GOATCOUNTER_HOST=${JSON.stringify(usage.host)};`);
+  vm.runInContext(source.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
   // Existing calculation fixtures use explicit IDs with matching display names.
   // Identity regressions below use the application's generated IDs instead.
   if (legacyFixtures) vm.runInContext('S.registry=Array.from({length:10},(_,i)=>({id:"sample"+(i+1),name:"sample"+(i+1)}));', context);
@@ -54,6 +57,68 @@ test('the first page has no eager OCR assets and contains static share text', ()
   assert.equal(calculator().api.freshState().mode, 'direct');
   assert.equal(calculator().api.freshState().nicknamesOpen, true);
   assert.equal(calculator().workers.length, 0);
+});
+
+test('usage counts successful settlement actions and sends only fixed event parameters', async () => {
+  const requests = [];
+  let copyFails = false;
+  const { api, elements } = calculator(false, undefined, false, {
+    host: 'sample1.goatcounter.com',
+    location: new URL('https://sample1.github.io/sejong-settlement/?account=sample-private-value'),
+    fetch: async (url, options) => { requests.push({ url, options }); },
+    clipboard: { writeText: async () => { if (copyFails) throw Error('Clipboard blocked'); } },
+    setTimeout() {},
+  });
+  api.enableRendering(); api.bindEvents();
+  elements.calculate.events.click();
+  assert.equal(requests.length, 1);
+
+  Object.assign(api.state(), { ppl: '2', nicknames: ['sample1', 'sample2'], account: 'sample-private-account' });
+  api.state().rounds[0].bill = '34567';
+  elements.calculate.events.click();
+  assert.match(elements.msg.textContent, /sample-private-account/);
+  assert.match(elements.msg.textContent, /34,567원/);
+  elements.cp.events.click();
+  elements.cp.events.click();
+  await new Promise(setImmediate);
+  copyFails = true;
+  elements.cp.events.click();
+  await new Promise(setImmediate);
+  assert.match(elements.cp.textContent, /길게 눌러 복사/);
+  api.state().mode = 'prepay';
+  copyFails = false;
+  elements.collect.events.click();
+  assert.match(elements.msg.textContent, /이번 모임 회비/);
+  elements.cp.events.click();
+  await new Promise(setImmediate);
+
+  assert.deepEqual(requests.map(({ url }) => url.searchParams.get('p')),
+    ['/sejong-settlement/', 'settlement-created', 'settlement-copied', 'settlement-copied']);
+  for (const [i, { url, options }] of requests.entries()) {
+    assert.equal(url.origin, 'https://sample1.goatcounter.com');
+    assert.equal(url.pathname, '/count');
+    assert.deepEqual([...url.searchParams.keys()].sort(), i ? ['e', 'ns', 'p', 'rnd'] : ['p', 'rnd']);
+    assert.equal(url.searchParams.get('e'), i ? '1' : null);
+    assert.equal(url.searchParams.get('ns'), i ? '1' : null);
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.referrerPolicy, 'no-referrer');
+    assert.equal(options.body, undefined);
+  }
+  assert.notEqual(requests[2].url.href, requests[3].url.href);
+});
+
+test('usage sends nothing in local previews or before a dashboard is configured', () => {
+  const requests = [];
+  const fetch = async url => { requests.push(url); };
+  for (const [host, url] of [
+    ['', 'https://sample1.github.io/sejong-settlement/'],
+    ['sample1.goatcounter.com', 'http://localhost/sejong-settlement/'],
+    ['example.invalid', 'https://sample1.github.io/sejong-settlement/'],
+  ]) {
+    const { elements } = calculator(false, undefined, false, { host, location: new URL(url), fetch });
+    assert.equal(elements.usageNotice.hidden, true);
+  }
+  assert.deepEqual(requests, []);
 });
 
 test('100,401 won split among four never leaves the organizer short', () => {
