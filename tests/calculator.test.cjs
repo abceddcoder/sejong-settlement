@@ -104,7 +104,8 @@ test('self badges are removed without changing nicknames beginning with na', () 
   for (const badge of ['© ', '[나] ', '(나) ', '【나】 ', '나 ', '● ']) {
     assert.deepEqual(Array.from(api.captureNicknames(badge + 'sample1/93/남/종촌')), ['sample1']);
   }
-  assert.deepEqual(Array.from(api.captureNicknames('나비/93/여/도담')), ['나비']);
+  const syntheticNickname = '나' + 'sample1';
+  assert.deepEqual(Array.from(api.captureNicknames(syntheticNickname + '/00/여/예시')), [syntheticNickname]);
 });
 
 test('a damaged gender field does not omit an attendee with a profile description', () => {
