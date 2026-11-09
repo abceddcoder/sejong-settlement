@@ -42,8 +42,9 @@ input[inputmode=numeric]{width:100%;min-width:0}
 .capture-help-text{display:block;margin:-6px 0 8px;padding:0 2px;border:0;background:none}
 .picker-actions{display:flex;align-items:center;gap:6px}
 .capture-help-icon{width:44px;padding:0;font-size:19px}
-#captureHelp{width:calc(100% - 24px);max-width:460px;max-height:85vh;max-height:85dvh;margin:auto;padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);overflow-y:auto;overscroll-behavior:contain}
-#captureHelp::backdrop{background:#000b}
+#captureHelp,#modeChangeConfirm{width:calc(100% - 24px);max-width:460px;max-height:85vh;max-height:85dvh;margin:auto;padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);overflow-y:auto;overscroll-behavior:contain}
+#captureHelp::backdrop,#modeChangeConfirm::backdrop{background:#000b}
+.mode-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin:16px 0 0}.mode-confirm-actions button{min-width:80px;min-height:44px;cursor:pointer}#confirmModeChange{background:var(--acbg);border-color:var(--ac)}
 .help-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 12px}
 .help-heading h2{margin:0}
 .help-heading button{width:44px;flex:none;cursor:pointer;font-size:22px;padding:0}
@@ -228,7 +229,7 @@ button:disabled{opacity:.55;cursor:default}
 </div>
 <label class="tg"><input type="checkbox" id="dOn"> 노술계산</label>
 <div id="rounds"></div>
-<div id="payerField"><label for="payer">결제한 사람 (선택)</label><select id="payer"><option value="">선택 안 함</option></select><p class="lb">선택한 사람은 ‘결제함’으로 표시하고 송금 안내에서 제외해요.</p></div>
+<div id="payerField"><label for="payer">결제한 사람 (선택)</label><select id="payer"><option value="">선택 안 함</option></select><p class="lb">선택한 사람은 부담액과 ‘결제함’을 표시하고 송금·환불 대상에서 제외해요.</p></div>
 <p class="warn" id="warn" hidden role="alert"></p>
 <div id="res" style="margin-top:10px"></div>
 <button id="calculate" type="button">계산하기</button>
@@ -251,6 +252,11 @@ button:disabled{opacity:.55;cursor:default}
 <p class="lb help-note">읽어 온 이름과 실제 참석자를 확인해 주세요.<br>위 그림은 사용 방법을 보여주는 예시예요.</p>
 <form method="dialog"><button class="help-done">알겠어요</button></form>
 </dialog>
+<dialog id="modeChangeConfirm" aria-labelledby="modeChangeTitle" aria-describedby="modeChangeDescription">
+<h2 id="modeChangeTitle">정산 방식 바꾸기</h2>
+<p id="modeChangeDescription">입금 확인을 해제하고 바로 정산으로 바꿀까요? 닉네임과 계산서 금액은 그대로 남아요.</p>
+<form method="dialog" class="mode-confirm-actions"><button value="cancel" autofocus>취소</button><button id="confirmModeChange" type="button">바꾸기</button></form>
+</dialog>
 <script>
 const $=id=>document.getElementById(id);
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
@@ -266,10 +272,19 @@ const isDirect=()=>S.mode==='direct';
 function setMode(mode){
  if(!['prepay','direct'].includes(mode)||mode===S.mode||captureBusy) return;
  // Confirmed payments must never be silently excluded from the final balance.
- if(mode==='direct'&&S.rounds.some(round=>round.payment)) return;
+ if(mode==='direct'&&S.rounds.some(round=>round.payment)){$('modeChangeConfirm').showModal();return;}
  S.mode=mode;
  if(isDirect()) S.nicknamesOpen=true;
  captureRevision++;refresh();
+}
+function confirmModeChange(){
+ const dialog=$('modeChangeConfirm');
+ if(!dialog.open||captureBusy||isDirect())return;
+ // Materialize the displayed names before clearing their payment snapshots.
+ const first=S.rounds[0].payment;
+ if(first){S.nicknames=[...first.names];S.ppl=String(first.names.length);}
+ S.rounds.forEach((round,i)=>{if(round.payment){if(i>0)round.collectionNames=[...round.payment.names];round.payment=null;}});
+ dialog.close();setMode('direct');
 }
 function amount(text,min=0,max=MAX_MONEY){
  if(typeof text!=='string'||!/^\d+$/.test(text)) return null;
@@ -538,9 +553,9 @@ function renderMode(){
  document.querySelectorAll('#settlementMode button').forEach(button=>{
   const on=button.dataset.mode===S.mode;
   button.classList.toggle('on',on);button.setAttribute('aria-pressed',String(on));
-  button.disabled=captureBusy||(button.dataset.mode==='direct'&&hasPayment);
+  button.disabled=captureBusy;
  });
- $('modeHint').textContent=direct?'선입금 없이 참석자와 계산서 금액으로 각자 낼 돈을 계산해요.':hasPayment?'받은 회비를 반영해 정산해요. 방식을 바꾸려면 입금 확인을 먼저 해제해 주세요.':'회비를 먼저 걷고, 계산서 기준으로 차액을 정산해요.';
+ $('modeHint').textContent=direct?'선입금 없이 참석자와 계산서 금액으로 각자 낼 돈을 계산해요.':hasPayment?'받은 회비를 반영해 정산해요. 바로 정산으로 바꿀 때 입금 확인 해제 여부를 물어봐요.':'회비를 먼저 걷고, 계산서 기준으로 차액을 정산해요.';
  $('collection').classList.toggle('direct',direct);
  $('collectionTitle').textContent=direct?'1. 1차 참석자 입력':'1. 주문할 때: 회비 걷기';
  $('settlementTitle').textContent=direct?'2. 계산서로 정산':'2. 모임 후: 계산서로 정산';
@@ -549,7 +564,7 @@ function renderMode(){
 }
 function payerNames(){return [...new Set(S.rounds.slice(0,S.lastRound).flatMap((round,i)=>round.settled?[]:roster(i+1)))];}
 function renderPayer(){
- $('payerField').hidden=!isDirect();if(!isDirect())return;
+ $('payerField').hidden=false;
  const names=payerNames(),select=$('payer'),key=JSON.stringify(names);
  if(!names.includes(S.payer))S.payer='';
  if(select._namesKey!==key){
@@ -558,7 +573,7 @@ function renderPayer(){
  }
  putValue('payer',S.payer);
 }
-function setPayer(name){if(!isDirect()||(name!==''&&!payerNames().includes(name)))return;S.payer=name;refresh();}
+function setPayer(name){if(name!==''&&!payerNames().includes(name))return;S.payer=name;refresh();}
 function refresh(save=true){
  clearCaptureReview();
  clearWarnings();$('message').hidden=true;
@@ -746,8 +761,8 @@ function roundedCost(shares){
  const unit=denominator*100n;
  return Number((numerator+unit-1n)/unit*100n);
 }
-function balanceText(balance,paidBySelf=false){return paidBySelf?'결제함':isDirect()?won(Math.max(0,-balance)):balance>0?'환불 '+won(balance):balance<0?'추가 입금 '+won(-balance):'정산 없음';}
-function renderBalance(label,balance,roundCosts='',paidBySelf=false){
+function balanceText(balance,paidBySelf=false,cost=0){return paidBySelf?won(cost)+' (결제함)':isDirect()?won(Math.max(0,-balance)):balance>0?'환불 '+won(balance):balance<0?'추가 입금 '+won(-balance):'정산 없음';}
+function renderBalance(label,balance,roundCosts='',paidBySelf=false,cost=0){
  const row=document.createElement('div');
  row.className='res';
  const description=document.createElement('span');
@@ -760,7 +775,7 @@ function renderBalance(label,balance,roundCosts='',paidBySelf=false){
  }
  const result=document.createElement('span');
  result.className='r';
- result.textContent=balanceText(balance,paidBySelf);
+ result.textContent=balanceText(balance,paidBySelf,cost);
  if(balance||paidBySelf) result.style.color=paidBySelf||balance>0?'var(--ok)':'var(--bad)';
  row.append(description,result);
  $('res').appendChild(row);
@@ -768,7 +783,7 @@ function renderBalance(label,balance,roundCosts='',paidBySelf=false){
 function directSettlementText(balances,account){
  const senders=balances.filter(item=>!item.paidBySelf),more=senders.some(item=>item.balance<0);
  const same=senders.length>0&&senders.every(item=>item.balance===senders[0].balance);
- const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf));
+ const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf,item.cost));
  if(account&&more)lines.unshift('입금 계좌: '+account+'\n');
  if(same)lines.push(senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.'));
  else if(more)lines.push('\n위 금액을 보내주세요.');
@@ -854,17 +869,18 @@ function settleByPerson(rounds,payments,account){
  for(const [name,shares] of costs){
   let amount=0;
   const details=shares.map(({number,share,noAlcohol})=>{const previous=Math.round(amount);amount+=share;return number+'차 '+won(Math.round(amount)-previous)+(noAlcohol?' (노술)':'');});
-  const cost=roundedCost(shares),rounding=cost-Math.round(amount),prepaid=paid.get(name)??0,paidBySelf=isDirect()&&name===S.payer,balance=paidBySelf?0:prepaid-cost;
+  const cost=roundedCost(shares),rounding=cost-Math.round(amount),prepaid=paid.get(name)??0,paidBySelf=name===S.payer,balance=paidBySelf?0:prepaid-cost;
   if(rounding>0) details.push('올림 +'+won(rounding));
   const paymentText=prepaid?'\n낸 회비 '+won(prepaid)+' ('+paidDetails.get(name).join(' · ')+')':'';
-  renderBalance(name+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText,paidBySelf);
-  refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf});
+  renderBalance(name+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText,paidBySelf,cost);
+  refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf,cost});
  }
  if(isDirect())return message+'\n'+directSettlementText(balances,account);
- const balance=balances[0]?.balance;
- message+='\n'+(balances.length&&balances.every(item=>item.balance===balance)
-  ?balances.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.'))
-  :balances.map(item=>'· '+item.name+' '+balanceText(item.balance)).join('\n'));
+ const recipients=balances.filter(item=>!item.paidBySelf),balance=recipients[0]?.balance;
+ const same=recipients.length>0&&recipients.every(item=>item.balance===balance);
+ const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+item.name+' '+balanceText(item.balance,item.paidBySelf,item.cost));
+ if(same)lines.push(recipients.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.')));
+ message+='\n'+lines.join('\n');
  if(refund) message+='\n\n돌려받으실 분은 계좌 남겨주세요.';
  if(more) message+=(refund?'\n':'\n\n')+'입금할 금액은 '+(account?account+ro(account)+' ':'')+'지금 보내주세요.';
  return message;
@@ -983,6 +999,7 @@ function bindEvents(){
  $('applyCapture').addEventListener('click',confirmCaptureReview);
  $('cancelCapture').addEventListener('click',()=>{const id=captureReview?.id;clearCaptureReview();if(id) $(id==='nicknames'?'captureStatus':id+'CaptureStatus').textContent='기존 명단을 유지했어요.';});
  document.querySelectorAll('#settlementMode button').forEach(button=>button.addEventListener('click',()=>setMode(button.dataset.mode)));
+ $('confirmModeChange').addEventListener('click',confirmModeChange);
  $('resetMeeting').addEventListener('click',resetMeeting);
  ['ppl','base'].forEach(id=>$(id).addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S[id]=$(id).value;refresh();}}));
  $('acct').addEventListener('input',()=>{S.account=$('acct').value;refresh();});
