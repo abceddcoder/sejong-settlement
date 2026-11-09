@@ -23,13 +23,13 @@ function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종�
     terminate() { this.terminated = true; }
   }
   const context = vm.createContext({
-    document: { getElementById: id => elements[id] ||= {}, querySelectorAll: () => [] },
+    document: { getElementById: id => elements[id] ||= { classList: { toggle() {} }, focus() {} }, querySelectorAll: () => [] },
     location: { protocol: 'https:' }, WebAssembly: {}, Worker,
     setTimeout, clearTimeout, rows,
   });
   vm.runInContext(script.replace('buildRounds();loadState();bindEvents();refresh(false);', ''), context);
   vm.runInContext('renderBalance=(...args)=>rows.push(args); captureImageBytes=async()=>new Uint8Array([1]); refresh=renderNicknames=saveState=()=>{};', context);
-  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
+  return { api: vm.runInContext('({roundedCost,settleByPerson,readCapture,captureNicknames,handleCapture,freezePayment,calculate,setMode,renderMode,normalizeState,freshState,togglePayment,state:()=>S,target:id=>{captureTarget=id;},feeFor:base=>{S.base=String(base);return feeInfo().fee;}})', context), rows, workers, elements };
 }
 
 test('the first page has no eager OCR assets and contains static share text', () => {
@@ -148,4 +148,101 @@ test('multiple images are rejected without reading or replacing any roster', asy
   assert.equal(JSON.stringify(api.state()), before);
   assert.equal(workers.length, 0);
   assert.doesNotMatch(html.match(/<input[^>]+id="captureFile"[^>]*>/)[0], /\bmultiple\b/);
+});
+
+test('direct settlement needs no estimate, buffer, or payment confirmation', () => {
+  const { api, rows } = calculator();
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.base = '';
+  state.rounds[0].bill = '100000';
+  state.rounds[1].collectionVisible = true;
+  state.rounds[1].collectionAmount = '25000';
+  api.setMode('direct');
+  const message = api.calculate(true);
+  assert.deepEqual(rows.map(row => row[1]), [-25000, -25000, -25000, -25000]);
+  assert.ok(rows.every(row => row[2] === true));
+  assert.match(message, /1차 4명 · 계산서 100,000원/);
+  assert.doesNotMatch(message, /받은 회비|낸 회비|추가 입금|돌려드려요/);
+});
+
+test('direct settlement still handles alcohol exclusions and later arrivals', () => {
+  const { api, rows } = calculator();
+  const state = api.state();
+  Object.assign(state, { ppl: '2', nicknames: ['sample1', 'sample2'], base: '', dOn: true, lastRound: 2 });
+  Object.assign(state.rounds[0], { bill: '100000', liquor: '20000', noAlcohol: ['sample2'] });
+  Object.assign(state.rounds[1], { bill: '20000', attendees: ['sample1', 'sample3'] });
+  api.setMode('direct');
+  const message = api.calculate(true);
+  assert.deepEqual(rows.map(row => row[1]), [-70000, -40000, -10000]);
+  assert.match(rows[1][3], /1차 40,000원 \(노술\)/);
+  assert.match(message, /2차 2명 · 계산서 20,000원/);
+});
+
+test('prepayment mode still requires confirmation and subtracts collected money', () => {
+  const { api, rows } = calculator();
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.rounds[0].bill = '100000';
+  assert.equal(api.calculate(), undefined);
+  assert.equal(rows.length, 0);
+  state.rounds[0].payment = api.freezePayment(state.nicknames, 36000);
+  assert.match(api.calculate(), /받은 회비 144,000원/);
+  assert.deepEqual(rows.map(row => row[1]), [11000, 11000, 11000, 11000]);
+});
+
+test('direct mode keeps nickname and receipt validation', () => {
+  const { api, elements } = calculator();
+  const state = api.state();
+  api.setMode('direct');
+  state.nicknames = ['sample1', '', '', ''];
+  state.rounds[0].bill = '100000';
+  assert.equal(api.calculate(true), undefined);
+  assert.match(elements.feeWarn.textContent, /닉네임을 중복 없이 모두/);
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.rounds[0].bill = '';
+  assert.equal(api.calculate(true), undefined);
+  assert.match(elements.warn.textContent, /계산서 금액/);
+});
+
+test('switching modes preserves input but cannot discard confirmed payments', () => {
+  const { api } = calculator();
+  const state = api.state();
+  state.nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
+  state.rounds[0].bill = '100000';
+  api.setMode('direct');
+  api.togglePayment(1, true);
+  assert.equal(state.rounds[0].payment, null);
+  api.setMode('prepay');
+  assert.equal(state.rounds[0].bill, '100000');
+  assert.equal(state.nicknames.length, 4);
+  state.rounds[0].payment = api.freezePayment(state.nicknames, 36000);
+  api.setMode('direct');
+  assert.equal(state.mode, 'prepay');
+  assert.equal(state.rounds[0].payment.amount, 36000);
+});
+
+test('saved mode is restored while older saves remain in prepayment mode', () => {
+  const { api } = calculator();
+  const legacy = JSON.parse(JSON.stringify(api.freshState()));
+  delete legacy.mode;
+  assert.equal(api.normalizeState(legacy).mode, 'prepay');
+  legacy.mode = 'direct';
+  assert.equal(api.normalizeState(legacy).mode, 'direct');
+  legacy.rounds[1].payment = { names: ['sample1'], amount: 25000 };
+  assert.equal(api.normalizeState(legacy).mode, 'prepay');
+});
+
+test('direct mode hides the collection controls and clearly labels the required inputs', () => {
+  const { api, elements } = calculator();
+  api.setMode('direct');
+  api.renderMode();
+  for (const id of ['estimateRow', 'feeEstimate', 'firstPaymentControls', 'prepayFields', 'addPrepay']) {
+    assert.equal(elements[id].hidden, true);
+  }
+  assert.equal(elements.collectionTitle.textContent, '1. 1차 참석자 입력');
+  api.setMode('prepay');
+  api.renderMode();
+  assert.equal(elements.estimateRow.hidden, false);
+  assert.equal(elements.firstPaymentControls.hidden, false);
 });
