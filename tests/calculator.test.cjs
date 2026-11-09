@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 require('./identity-cases.cjs')({ test, assert, calculator: () => calculator(false, undefined, false), html });
+require('./final-polish.cjs')({ test, assert, calculator: () => calculator(false, undefined, false), html });
 
 function calculator(workerFailure = false, recognizedText = 'sample1/93/남/종촌\nsample2/92/여/도담', legacyFixtures = true) {
   const rows = [], workers = [];
@@ -478,7 +479,7 @@ test('a selected payer keeps their share but is excluded from the senders and gr
   api.setPayer('sample1');
   const message = api.calculate();
   assert.deepEqual(rows.map(row => row[1]), [0, -5500, -5500, -5500]);
-  assert.match(rows[0][0], /부담액 5,500원/);
+  assert.equal(rows[0][0], 'sample1');
   assert.equal(rows[0][3], true);
   assert.match(message, /· sample1 5,500원 \(결제함\)\n3명 모두 1인 5,500원씩 보내주세요\. \(sample2, sample3, sample4\)$/);
   assert.doesNotMatch(message, /4명 모두|추가 입금|환불/);
@@ -541,7 +542,7 @@ test('prepayment shows payer cost and groups refunds for everyone else without c
   assert.equal(elements.payerField.hidden, false);
   state.rounds[0].payment = api.freezePayment(state.nicknames, 6000);
   const message = api.calculate();
-  assert.match(message, /· sample1 5,000원 \(결제함\)\nsample2 1인 1,000원 환불해 드릴게요\./);
+  assert.match(message, /· sample1 5,000원 \(결제함\)\nsample2 1,000원 환불해 드릴게요\./);
   assert.deepEqual(rows.map(row => row[1]), [0, 1000]);
   for (const row of rows) api.renderBalanceUI(...row);
   assert.deepEqual(elements.res.children.map(row => row.children[1].textContent), ['5,000원 (결제함)', '환불 1,000원']);
@@ -575,7 +576,7 @@ test('a solo payer or a zero bill never gets an instruction to send money', () =
   assert.doesNotMatch(message, /보내주세요|추가 입금|환불/);
   assert.equal(rows[0][1], 0);
   api.setPayer(''); state.rounds[0].bill = '0';
-  assert.match(api.calculate(), /sample1 1인 0원이에요\.$/);
+  assert.equal(api.calculate(), undefined);
 });
 
 test('prepayment groups additional deposits separately from the payer and keeps payment records', () => {
@@ -761,7 +762,7 @@ test('money previews cover empty, zero, invalid and maximum values without loose
   }
   api.state().nicknames = ['sample1', 'sample2', 'sample3', 'sample4'];
   assert.equal(api.calculate(true), undefined);
-  assert.match(elements.warn.textContent, /계산서 금액을 숫자로/);
+  assert.match(elements.warn.textContent, /계산서 금액을 넣어 주세요/);
 });
 
 test('previews show saved and confirmed amounts while locked fields cannot change their values', () => {
@@ -813,7 +814,7 @@ test('round status uses planned attendance before names without relaxing mandato
   state.rounds[1].attendees = []; api.renderRounds();
   assert.equal(elements.roundStatus2.textContent, '0명'); assert.equal(elements.roundStatus3.textContent, '0명');
   state.rounds[0].settled = true; api.renderRounds();
-  assert.equal(elements.roundStatus1.textContent, '6명 · 정산 완료 · 이번 계산에서 제외');
+  assert.equal(elements.roundStatus1.textContent, '6명 · 이미 정산함 · 이번 계산에서 제외');
 });
 
 test('confirmed mode changes preserve displayed snapshot names and stop subtracting prepayments', () => {

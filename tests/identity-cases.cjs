@@ -50,16 +50,18 @@ module.exports = ({ test, assert, calculator, html }) => {
     assert.deepEqual(elements.prepayNames2.children.map(label => label.children[1].textContent), ['sample1', 'sample2']);
   });
 
-  test('a duplicate display name across different rounds never merges distinct identities or generates ambiguous charges', () => {
+  test('matching an existing later nickname links both rounds to one identity', () => {
     const { api, elements } = calculator(), state = api.state();
     Object.assign(state, { ppl: '1', nicknames: ['sample1'], lastRound: 2 });
     state.rounds[0].bill = '10000'; state.rounds[1].bill = '20000'; api.enableRendering(); api.bindEvents();
     api.setRoster('actual', 2, ['sample2']);
     const input = elements.nicknames.children[0]; input.value = 'sample2'; input.events.input();
     assert.notEqual(state.nicknameIds[0], state.rounds[1].attendees[0]);
-    assert.equal(api.calculate(true), undefined); assert.match(elements.warn.textContent, /같은 닉네임/);
+    assert.match(api.calculate(true), /sample2 30,000원 보내주세요/);
+    assert.equal(state.nicknameIds[0], state.rounds[1].attendees[0]);
     input.value = 'sampleRenamed'; input.events.input();
-    assert.match(api.calculate(true), /sampleRenamed 10,000원/);
+    assert.match(api.calculate(true), /sampleRenamed 30,000원/);
+    assert.deepEqual(Array.from(api.roster(2)), ['sampleRenamed']);
   });
   test('editing a first-round nickname keeps the same identity in later attendance, alcohol and payer selections', () => {
     const { api, elements, rows, storage } = calculator(), state = api.state();
@@ -149,8 +151,8 @@ module.exports = ({ test, assert, calculator, html }) => {
       const round = { number: 1, names, bill: 20500, liquor: 0, noAlcohol: [] };
       const message = api.settleByPerson([round], [], '');
       assert.doesNotMatch(message, /1명 모두/);
-      assert.match(message, mode === 'direct' ? /sample1 1인 20,500원 보내주세요\./ : /sample1 1인 20,500원 추가 입금해 주세요\./);
-      if (mode === 'prepay') assert.match(api.settleByPerson([round], [{ number: 1, names, amount: 21000 }], ''), /sample1 1인 500원 환불해 드릴게요\./);
+      assert.match(message, mode === 'direct' ? /sample1 20,500원 보내주세요\./ : /sample1 20,500원 추가 입금해 주세요\./);
+      if (mode === 'prepay') assert.match(api.settleByPerson([round], [{ number: 1, names, amount: 21000 }], ''), /sample1 500원 환불해 드릴게요\./);
     }
   });
 

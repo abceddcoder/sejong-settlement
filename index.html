@@ -208,7 +208,7 @@ button:disabled{opacity:.55;cursor:default}
 <div class="row" id="estimateRow" hidden><label for="base">1인 회비</label><div class="money-field"><input type="text" id="base" inputmode="numeric" pattern="[0-9]*" value="30000" aria-describedby="basePreview baseLimit"><small id="basePreview" class="money-preview"></small><small id="baseLimit" class="money-limit warn" role="status"></small></div><span class="unit">원</span></div>
 <div class="row"><label for="acct">입금 계좌<br><span style="font-size:12px">(선택)</span></label><input type="text" id="acct" maxlength="300" placeholder="은행 · 계좌번호 · 예금주" autocomplete="off"></div>
 <div id="feeEstimate" hidden>
-<div class="grid"><div class="mc"><p class="lb">1인 회비</p><p class="nm" id="fee">-</p></div><div class="mc"><p class="lb">총 모이는 금액</p><p class="nm" id="tot">-</p></div></div>
+<div class="mc"><p class="lb">총 모이는 금액</p><p class="nm" id="tot">-</p></div>
 </div>
 <p class="warn" id="feeWarn" hidden role="alert"></p>
 <div id="firstPaymentControls" hidden>
@@ -232,8 +232,8 @@ button:disabled{opacity:.55;cursor:default}
 <div id="rounds"></div>
 <div id="payerField"><label for="payer">결제한 사람 (선택)</label><select id="payer"><option value="">선택 안 함</option></select><p class="lb">선택한 사람은 부담액과 ‘결제함’을 표시하고 송금·환불 대상에서 제외해요.</p></div>
 <p class="warn" id="warn" hidden role="alert"></p>
+<button id="calculate" type="button">정산 문구 만들기</button>
 <div id="res" style="margin-top:10px"></div>
-<button id="calculate" type="button">계산하기</button>
 </section>
 <section id="message" hidden><h2>단톡 안내 문구</h2><div id="msg"></div><button id="cp" type="button">문구 복사</button></section>
 <div id="captureReview" class="capture-review" hidden aria-labelledby="captureReviewTitle">
@@ -274,22 +274,42 @@ function freshRound(index){
 }
 function freshState(){return {version:2,registry:[],nextPersonId:1,nicknameIds:[],mode:'direct',ppl:'4',base:'30000',account:'',payer:'',nicknames:['','','',''],nicknamesOpen:true,lastRound:1,dOn:false,people:[],rounds:Array.from({length:4},(_,i)=>freshRound(i))};}
 let S=freshState();
-function personName(id,number=0,state=S){return (number&&state.rounds[number-1].snapshot?.labels.find(person=>person.id===id)?.name)||state.registry.find(person=>person.id===id)?.name||'';}
+function personId(id,state=S){
+ const seen=new Set();let person=state.registry.find(person=>person.id===id);
+ while(person?.mergedInto){if(seen.has(id))throw Error('invalid identity link');seen.add(id);id=person.mergedInto;person=state.registry.find(person=>person.id===id);}
+ return id;
+}
+function personIds(ids,state=S){return [...new Set(ids.map(id=>personId(id,state)))];}
+function personName(id,number=0,state=S){return (number&&state.rounds[number-1].snapshot?.labels.find(person=>person.id===id)?.name)||state.registry.find(person=>person.id===personId(id,state))?.name||'';}
 function registerPerson(name,state=S){let id;do{id='p'+state.nextPersonId++;}while(state.registry.some(person=>person.id===id));state.registry.push({id,name});return id;}
-function syncFirstPeople(){
+function mergePerson(from,to){
+ if(from===to)return;
+ S.registry.find(person=>person.id===from).mergedInto=to;
+ S.nicknameIds=S.nicknameIds.map(id=>personId(id));S.people=personIds(S.people);if(S.payer)S.payer=personId(S.payer);
+ for(const r of S.rounds){
+  if(r.settled)continue; // Keep the completed record exactly as it was; resolve links when reopened.
+  for(const key of ['attendees','noAlcohol','collectionNames'])if(r[key]!==null)r[key]=personIds(r[key]);
+  if(r.payment)r.payment=freezePayment(personIds(r.payment.names),r.payment.amount);
+ }
+}
+function syncFirstPeople(linkNames=false){
  if(S.rounds[0].payment||S.rounds[0].settled)return;
+ const registered=new Set(personIds([...S.people,...S.rounds.flatMap(r=>[...(r.attendees??[]),...(r.collectionNames??[]),...(r.payment?.names??[]),...(r.snapshot?.attendees??[])])]));
  S.nicknames.forEach((value,index)=>{
-  const name=value.trim();let id=S.nicknameIds[index];
-  if(!id){id=(name&&S.registry.find(person=>person.name===name&&!S.nicknameIds.includes(person.id))?.id)||registerPerson(name);S.nicknameIds[index]=id;}
+  const name=value.trim();let id=S.nicknameIds[index]&&personId(S.nicknameIds[index]);
+  if(!id){id=(name&&S.registry.find(person=>!person.mergedInto&&person.name===name&&!S.nicknameIds.includes(person.id))?.id)||registerPerson(name);S.nicknameIds[index]=id;}
+  const match=linkNames&&name&&S.registry.find(person=>!person.mergedInto&&person.id!==id&&person.name===name&&registered.has(person.id)&&!S.nicknameIds.some((other,i)=>i!==index&&personId(other)===person.id));
+  if(match){mergePerson(id,match.id);id=match.id;}
+  S.nicknameIds[index]=id;
   S.registry.find(person=>person.id===id).name=name;
  });
 }
 function firstIds(){syncFirstPeople();const r=S.rounds[0];return [...(r.settled&&r.snapshot?r.snapshot.attendees:r.payment?.names??S.nicknameIds.slice(0,amount(S.ppl,1,100)??0))].filter(id=>personName(id,1));}
-function rosterIds(number,state=S){const r=state.rounds[number-1];if(r.settled&&r.snapshot)return [...r.snapshot.attendees];if(number===1)return state===S?firstIds():[...(r.payment?.names??state.nicknameIds.slice(0,amount(state.ppl,1,100)??0))].filter(id=>personName(id,0,state));return r.attendees===null?rosterIds(number-1,state):[...r.attendees];}
-function noAlcoholIds(number,state=S){const r=state.rounds[number-1],ids=r.settled&&r.snapshot?r.snapshot.noAlcohol:r.noAlcohol===null?(number>1?noAlcoholIds(number-1,state):[]):r.noAlcohol;const attending=rosterIds(number,state);return ids.filter(id=>attending.includes(id));}
-function collectionIds(number){const r=S.rounds[number-1];return r.payment?[...r.payment.names]:number===1?firstIds():r.collectionNames===null?rosterIds(number):[...r.collectionNames];}
-function idsForNames(names){syncFirstPeople();return names.map(name=>S.registry.find(person=>person.name===name)?.id||registerPerson(name));}
-function knownIds(){syncFirstPeople();return [...new Set([...firstIds(),...S.people,...S.rounds.flatMap(r=>[...(r.attendees??[]),...(r.collectionNames??[]),...(r.payment?.names??[])])])].filter(id=>personName(id));}
+function rosterIds(number,state=S){const r=state.rounds[number-1];if(r.settled&&r.snapshot)return [...r.snapshot.attendees];if(number===1)return state===S?firstIds():[...(r.payment?.names??state.nicknameIds.slice(0,amount(state.ppl,1,100)??0))].filter(id=>personName(id,0,state));return personIds(r.attendees===null?rosterIds(number-1,state):r.attendees,state);}
+function noAlcoholIds(number,state=S){const r=state.rounds[number-1],ids=r.settled&&r.snapshot?r.snapshot.noAlcohol:personIds(r.noAlcohol===null?(number>1?noAlcoholIds(number-1,state):[]):r.noAlcohol,state);const attending=rosterIds(number,state);return ids.filter(id=>attending.includes(id));}
+function collectionIds(number){const r=S.rounds[number-1],ids=r.payment?r.payment.names:number===1?firstIds():r.collectionNames===null?rosterIds(number):r.collectionNames;return r.settled?[...ids]:personIds(ids);}
+function idsForNames(names){syncFirstPeople();return names.map(name=>S.registry.find(person=>!person.mergedInto&&person.name===name)?.id||registerPerson(name));}
+function knownIds(){syncFirstPeople();return personIds([...firstIds(),...S.people,...S.rounds.flatMap(r=>[...(r.attendees??[]),...(r.collectionNames??[]),...(r.payment?.names??[])])]).filter(id=>personName(id));}
 function roundSnapshot(number,state=S){
  const r=state.rounds[number-1],attendees=rosterIds(number,state),noAlcohol=noAlcoholIds(number,state);
  const ids=[...new Set([...attendees,...(r.payment?.names??[]),...(r.collectionNames??[])])];
@@ -343,9 +363,11 @@ function normalizeState(raw){
  const money=value=>{const clean=typeof value==='string'?value.replace(/[,\s]/g,''):'';return clean.length<=10?clean:'';};
  state.ppl=str(raw.ppl,8);state.base=money(raw.base);state.account=str(raw.account,300);
  if(!Array.isArray(raw.registry)||raw.registry.length>2000)throw Error('invalid people');
- state.registry=raw.registry.map(person=>({id:str(person.id,40),name:str(person.name)}));
+ state.registry=raw.registry.map(person=>({id:str(person.id,40),name:str(person.name),...(person.mergedInto?{mergedInto:str(person.mergedInto,40)}:{})}));
  const ids=new Set(state.registry.map(person=>person.id));
  if(ids.size!==state.registry.length||state.registry.some(person=>!person.id))throw Error('invalid identity');
+ if(state.registry.some(person=>person.mergedInto&&!ids.has(person.mergedInto)))throw Error('unknown identity link');
+ state.registry.forEach(person=>personId(person.id,state));
  const refs=(value,nullable=false,max=100)=>{const result=list(value,nullable,max);if(result?.some(id=>!ids.has(id)))throw Error('unknown identity');return result;};
  state.nicknameIds=refs(raw.nicknameIds);state.nextPersonId=Number.isSafeInteger(raw.nextPersonId)&&raw.nextPersonId>0?raw.nextPersonId:1;
  state.payer=raw.payer===undefined?'':str(raw.payer);
@@ -427,6 +449,7 @@ function collectionError(number,text,field){
  saveState();
 }
 function firstParticipants(report=false){
+ if(report)syncFirstPeople(true);
  const count=amount(S.ppl,1,100);
  if(count===null){if(report) collectionError(1,'참석 인원은 1~100명으로 입력해 주세요.','ppl');return null;}
  const names=firstNames();
@@ -462,7 +485,7 @@ function pickerHtml(kind,number){
 function moneyField(id,attributes){return '<div class="money-field"><input type="text" id="'+id+'" inputmode="numeric" pattern="[0-9]*" aria-describedby="'+id+'Preview '+id+'Limit" '+attributes+'><small id="'+id+'Preview" class="money-preview"></small><small id="'+id+'Limit" class="money-limit warn" role="status"></small></div>';}
 function readMoneyInput(id,previous){
  const input=$(id),value=input.value.replace(/[,\s]/g,'');
- if(value.length>10){input.value=previous;$(id+'Limit').textContent='금액은 10자리 이하로 입력해 주세요. 이전 금액을 유지했어요.';return previous;}
+ if(value.length>10){input.value=previous;$(id+'Limit').textContent='금액은 10자리까지 넣을 수 있어요';return previous;}
  $(id+'Limit').textContent='';if(input.value!==value)input.value=value;return value;
 }
 function renderMoneyInput(id,value){if($(id).value!==value)$(id+'Limit').textContent='';putValue(id,value);const parsed=amount(value);$(id+'Preview').textContent=parsed===null?'':won(parsed);}
@@ -471,7 +494,7 @@ function buildRounds(){
  for(let n=1;n<=4;n++){
   bills+='<div class="rd" id="r'+n+'"><div class="rr bill-row"><label for="b'+n+'"><b>'+n+'차</b></label>'+moneyField('b'+n,'placeholder="계산서 총액" aria-label="'+n+'차 계산서 총액"')+'</div>'
    +'<div class="round-roster lb" id="roundStatus'+n+'"></div>'
-   +'<label class="tg settled-toggle"><input type="checkbox" id="settled'+n+'" aria-label="'+n+'차 정산 완료"> 정산 완료</label>';
+   +'<label class="tg settled-toggle"><input type="checkbox" id="settled'+n+'" aria-label="'+n+'차 이미 정산함" aria-describedby="settledHint'+n+'"> 이미 정산함</label><p id="settledHint'+n+'" class="lb picker-hint">입금·환불까지 모두 끝난 차수만 체크해 주세요. 체크하면 계산에서 빠져요.</p>';
   if(n>1){
    bills+='<details id="rosterEdit'+n+'" class="round-roster-edit"><summary>명단 수정</summary>'+pickerHtml('actual',n)+'</details>';
    collections+='<details class="collection-round" id="prepayRound'+n+'" hidden><summary><span id="collectionSummary'+n+'"></span><span class="summary-action">보기 / 수정</span></summary><div class="collection-body">'
@@ -498,6 +521,7 @@ function renderNicknames(){
   const input=document.createElement('input');input.type='text';input.id='nickname'+(i+1);input.placeholder='닉네임 '+(i+1);input.autocomplete='off';input.maxLength=80;input.required=true;
   input.setAttribute('aria-label','참석자 '+(i+1)+' 닉네임');
   input.addEventListener('input',()=>{if(!S.rounds[0].payment&&!S.rounds[0].settled){S.nicknames[i]=input.value;refresh();}});
+  input.addEventListener('change',()=>{syncFirstPeople(true);refresh();});
   container.appendChild(input);
  }
  Array.from(container.children).forEach((input,i)=>{input.hidden=i>=count;input.disabled=locked;const value=locked?(firstNames()[i]??''):S.nicknames[i]??'';if(input.value!==value) input.value=value;});
@@ -568,7 +592,7 @@ function renderCollection(number){
   putValue('ppl',S.ppl);renderMoneyInput('base',S.base);putValue('acct',S.account);
   $('ppl').disabled=$('base').disabled=Boolean(payment)||r.settled;
   renderNicknames();
-  const info=feeInfo();$('fee').textContent=info?won(info.fee):'-';$('tot').textContent=info?won(info.fee*info.ppl):'-';
+  const info=feeInfo();$('tot').textContent=info?won(info.fee*info.ppl):'-';
  }else{
   const id='prepayNames'+number;
   renderChoices(id,r.settled?collectionIds(number):knownIds(),collectionIds(number),Boolean(payment)||r.settled,(name,on)=>toggleRoster('collection',number,name,on),number);
@@ -591,7 +615,7 @@ function renderRounds(){
   const status=r.payment?(n===1?'회비 반영':'선입금 반영'):n===1?'입금 확인 전':r.collectionVisible&&r.collectionAmount?'입금 확인 전':'선입금 없음';
   const expected=S.rounds[0].payment?.names.length??amount(S.ppl,1,100)??0;
   const pending=!r.settled&&S.rounds.slice(1,n).every(round=>round.attendees===null)&&names.length<expected;
-  $('roundStatus'+n).textContent=(pending?expected:names.length)+'명'+(pending?' · 닉네임 입력 '+(names.length?'중':'전'):'')+(r.settled?' · 정산 완료 · 이번 계산에서 제외':isDirect()?'':' · '+status);
+  $('roundStatus'+n).textContent=(pending?expected:names.length)+'명'+(pending?' · 닉네임 입력 '+(names.length?'중':'전'):'')+(r.settled?' · 이미 정산함 · 이번 계산에서 제외':isDirect()?'':' · '+status);
   $('noAlcoholBlock'+n).hidden=!(r.settled&&r.snapshot?r.snapshot.dOn:S.dOn);
   renderChoices('noAlcohol'+n,names,noAlcohol,r.settled,(name,on)=>{
    if(r.settled)return;const chosen=noAlcoholIds(n);r.noAlcohol=on?[...new Set([...chosen,name])]:chosen.filter(value=>value!==name);refresh();
@@ -844,7 +868,7 @@ function directSettlementText(balances,account){
  const same=senders.length>0&&senders.every(item=>item.balance===senders[0].balance);
  const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+settlementName(item)+' '+balanceText(item.balance,item.paidBySelf,item.cost));
  if(account&&more)lines.unshift('입금 계좌: '+account+'\n');
- if(same)lines.push(senders.length===1?settlementName(senders[0])+' 1인 '+won(Math.max(0,-senders[0].balance))+(more?' 보내주세요.':'이에요.'):senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.')+recipientNames(senders));
+ if(same)lines.push(senders.length===1?settlementName(senders[0])+' '+won(Math.max(0,-senders[0].balance))+(more?' 보내주세요.':'이에요.'):senders.length+'명 모두 1인 '+won(Math.max(0,-senders[0].balance))+(more?'씩 보내주세요.':'이에요.')+recipientNames(senders));
  else if(more)lines.push('\n위 금액을 보내주세요.');
  return lines.join('\n');
 }
@@ -852,9 +876,9 @@ function directSettlementText(balances,account){
 function ro(s){const c=s.charCodeAt(s.length-1); if(c>=0xAC00&&c<=0xD7A3){const j=(c-0xAC00)%28; return (j===0||j===8)?'로':'으로';} return '2459'.includes(s[s.length-1])?'로':'으로';}
 
 function settlementRound(n,report=false){
- const r=S.rounds[n-1],names=rosterIds(n),bill=amount(r.bill),liquor=S.dOn&&r.liquor!==''?amount(r.liquor):0;
+ const r=S.rounds[n-1],names=rosterIds(n),bill=amount(r.bill,1),liquor=S.dOn&&r.liquor!==''?amount(r.liquor):0;
  if(!validNames(names.map(id=>personName(id)))){if(report){warn(n+'차 참석자를 중복 없이 1~100명 선택해 주세요.');if(n>1){r.rosterOpen=true;$('rosterEdit'+n).open=true;}}return;}
- if(bill===null){if(report){warn(n+'차 계산서 금액을 숫자로 입력해 주세요.');$('b'+n).focus();}return;}
+ if(bill===null){if(report){warn(n+'차 계산서 금액을 넣어 주세요.');$('b'+n).focus();}return;}
  if(liquor===null||liquor>bill){if(report){warn(n+'차 술값은 계산서 총액 이하의 숫자로 입력해 주세요.');$('k'+n).focus();}return;}
  const noAlcohol=S.dOn?noAlcoholIds(n):[];
  if(liquor>0&&noAlcohol.length===names.length){if(report) warn(n+'차 술값이 있지만 술 마신 사람이 없어요. 노술 선택을 확인해 주세요.');return;}
@@ -864,7 +888,7 @@ function toggleSettled(number,checked){
  if(checked&&(!firstParticipants(true)||!settlementRound(number,true))){$('settled'+number).checked=false;return;}
  const r=S.rounds[number-1];
  if(checked&&!r.settled)r.snapshot=roundSnapshot(number);
- if(!checked&&r.snapshot){if(number>1)r.attendees=[...r.snapshot.attendees];r.noAlcohol=[...r.snapshot.noAlcohol];r.snapshot=null;}
+ if(!checked&&r.snapshot){if(number>1)r.attendees=personIds(r.snapshot.attendees);r.noAlcohol=personIds(r.snapshot.noAlcohol);if(r.collectionNames)r.collectionNames=personIds(r.collectionNames);if(r.payment)r.payment=freezePayment(personIds(r.payment.names),r.payment.amount);r.snapshot=null;}
  r.settled=checked;
  captureRevision++;refresh();
 }
@@ -895,7 +919,7 @@ function calculate(report=false){
   const round=settlementRound(n,report);if(!round) return;
   rounds.push(round);
  }
- if(!rounds.length){if(report) warn('선택한 차수는 모두 정산 완료됐어요. 다음 차수를 선택하거나 정산 완료 체크를 해제해 주세요.');return;}
+ if(!rounds.length){if(report) warn('선택한 차수는 모두 정산 완료됐어요. 다음 차수를 선택하거나 이미 정산함 체크를 해제해 주세요.');return;}
  const ids=[...new Set([...rounds,...payments].flatMap(item=>item.names))],labels=ids.map(id=>personName(id));
  if(labels.some(name=>!name)||new Set(labels).size!==labels.length){if(report)warn('서로 다른 참석자가 같은 닉네임을 쓰고 있어요. 구분되는 닉네임으로 수정해 주세요.');return;}
  return settleByPerson(rounds,payments,S.account.trim());
@@ -936,14 +960,14 @@ function settleByPerson(rounds,payments,account){
   if(rounding>0) details.push('올림 +'+won(rounding));
   if(rounding<0) details.push('표시 차이 −'+won(-rounding));
   const paymentText=prepaid?'\n낸 회비 '+won(prepaid)+' ('+paidDetails.get(name).join(' · ')+')':'';
-  renderBalance(personName(name)+' · 부담액 '+won(cost),balance,details.join(' · ')+paymentText,paidBySelf,cost);
+  renderBalance(personName(name)+(isDirect()?'':' · 부담액 '+won(cost)),balance,details.join(' · ')+paymentText,paidBySelf,cost);
   refund ||= balance>0;more ||= balance<0;balances.push({name,balance,paidBySelf,cost,noAlcohol:rounds.some(round=>round.noAlcohol.includes(name)&&round.names.includes(name))});
  }
  if(isDirect())return message+'\n'+directSettlementText(balances,account);
  const recipients=balances.filter(item=>!item.paidBySelf),balance=recipients[0]?.balance;
  const same=recipients.length>0&&recipients.every(item=>item.balance===balance);
  const lines=(same?balances.filter(item=>item.paidBySelf):balances).map(item=>'· '+settlementName(item)+' '+balanceText(item.balance,item.paidBySelf,item.cost));
- if(same)lines.push(recipients.length===1?settlementName(recipients[0])+' '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+' '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.')):recipients.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.'))+recipientNames(recipients));
+ if(same)lines.push(recipients.length===1?settlementName(recipients[0])+' '+(balance===0?'정산 없음.':won(Math.abs(balance))+' '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.')):recipients.length+'명 모두 '+(balance===0?'정산 없음.':'1인 '+won(Math.abs(balance))+'씩 '+(balance>0?'환불해 드릴게요.':'추가 입금해 주세요.'))+recipientNames(recipients));
  message+='\n'+lines.join('\n');
  if(refund) message+='\n\n돌려받으실 분은 계좌 남겨주세요.';
  if(more) message+=(refund?'\n':'\n\n')+'입금할 금액은 '+(account?account+ro(account)+' ':'')+'지금 보내주세요.';
@@ -967,7 +991,7 @@ function addCollection(){
  if(isDirect()) return;
  const index=S.rounds.findIndex((r,i)=>i>0&&!r.collectionVisible);if(index===-1) return;
  const r=S.rounds[index];r.collectionVisible=true;r.collectionOpen=true;r.collectionNames=rosterIds(index+1);
- S.lastRound=Math.max(S.lastRound,index+1);refresh();$('prepayRound'+(index+1)).scrollIntoView({block:'nearest'});
+ refresh();$('prepayRound'+(index+1)).scrollIntoView({block:'nearest'});
 }
 function removeCollection(number){
  const r=S.rounds[number-1];if(number===1||r.payment||r.settled) return;
@@ -1108,7 +1132,7 @@ function bindEvents(){
   const account=S.account.trim();let message='이번 모임 회비는 1인 '+won(draft.amount)+'이에요.\n참석자 '+draft.names.map(id=>personName(id)).join(', ')+'\n끝나고 계산서 기준으로 남는 돈은 돌려드리고 모자라면 더 걷을게요.';
   if(account) message+='\n'+account+ro(account)+' 입금해 주세요.';showMessage('collection',message);
  });
- $('calculate').addEventListener('click',()=>{clearWarnings();$('message').hidden=true;const message=calculate(true);if(message!==undefined) showMessage('settlement',message);saveState();});
+ $('calculate').addEventListener('click',()=>{syncFirstPeople(true);refresh(false);const message=calculate(true);if(message!==undefined) showMessage('settlement',message);saveState();});
  $('cp').addEventListener('click',()=>{
   const ok=()=>{$('cp').textContent='복사됨';setTimeout(()=>{$('cp').textContent='문구 복사';},1500);};
   const fail=()=>{const range=document.createRange();range.selectNodeContents($('msg'));const selected=getSelection();selected.removeAllRanges();selected.addRange(range);$('cp').textContent='글자를 길게 눌러 복사하세요';};
